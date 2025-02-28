@@ -17,9 +17,12 @@ async def get_all_channels() -> List[Dict]:
     client = get_slack_client()
     channels = []
     cursor = None
+    page = 1
     
+    print("\nFetching channels (200 per page)...")
     while True:
         try:
+            print(f"Fetching page {page}...")
             # Get both public and private channels
             response = client.conversations_list(
                 types="public_channel,private_channel",
@@ -31,7 +34,9 @@ async def get_all_channels() -> List[Dict]:
             if not response["ok"]:
                 raise SlackApiError("Failed to fetch channels", response)
                 
-            channels.extend(response["channels"])
+            new_channels = response["channels"]
+            channels.extend(new_channels)
+            print(f"Found {len(new_channels)} channels on page {page} (Total: {len(channels)})")
             
             # Handle pagination
             cursor = response.get("response_metadata", {}).get("next_cursor")
@@ -39,7 +44,9 @@ async def get_all_channels() -> List[Dict]:
                 break
                 
             # Respect rate limits (Tier 2: 20+ per minute)
+            print("Waiting for rate limit...")
             await asyncio.sleep(1)
+            page += 1
             
         except SlackApiError as e:
             error_code = e.response.get("error", "unknown_error")
@@ -50,6 +57,7 @@ async def get_all_channels() -> List[Dict]:
                 )
             raise
     
+    print(f"\nFetched {len(channels)} total channels")
     return channels
 
 async def get_channel_info(client, channel_id: str) -> Dict:
