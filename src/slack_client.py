@@ -3,34 +3,41 @@ from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-def validate_scopes(client: WebClient) -> None:
+def validate_client(client: WebClient) -> None:
     """
-    Validate that the token has the required scopes for channel management.
-    Required scopes: channels:write (public channels), groups:write (private channels)
-    Raises ValueError if required scopes are missing.
+    Validate that the client can connect and has necessary permissions.
     """
     try:
-        print("Checking token scopes...")
-        response = client.auth_test()
-        scopes = response.get("scope", "").split(",")
-        print(f"Available scopes: {scopes}")
+        print("Testing Slack connection...")
+        auth_response = client.auth_test()
+        print(f"Connected as: {auth_response['user']} to workspace: {auth_response['team']}")
         
-        required_scopes = {"channels:write", "groups:write", "channels:read", "groups:read", "chat:write"}
-        missing_scopes = required_scopes - set(scopes)
+        # Test channel listing (this will fail if we don't have the right scopes)
+        print("Testing channel access...")
+        channels_response = client.conversations_list(types="public_channel", limit=1)
+        private_channels_response = client.conversations_list(types="private_channel", limit=1)
         
-        if missing_scopes:
-            raise ValueError(
-                f"Missing required scopes: {', '.join(missing_scopes)}. "
-                "Please add these scopes to your Slack app configuration."
-            )
+        print("✓ Successfully validated channel read permissions")
+        
     except SlackApiError as e:
-        print(f"\nDebug information:")
-        print(f"Error response: {e.response}")
-        raise ValueError(f"Failed to validate scopes: {str(e)}")
+        error = e.response["error"]
+        if error == "missing_scope":
+            print("\nError: Missing required scopes!")
+            print("Please add these scopes to your Slack app configuration:")
+            print("- channels:write - For managing public channels")
+            print("- groups:write - For managing private channels")
+            print("- channels:read - For listing public channels")
+            print("- groups:read - For listing private channels")
+            print("- chat:write - For posting messages")
+        else:
+            print(f"\nDebug information:")
+            print(f"Error type: {error}")
+            print(f"Full response: {e.response}")
+        raise ValueError(f"Failed to validate Slack access: {error}")
 
 def get_slack_client() -> WebClient:
     """
-    Create and return a Slack WebClient instance with validated token and scopes.
+    Create and return a Slack WebClient instance.
     
     Required Scopes:
     - channels:write: For managing public channels
@@ -55,7 +62,7 @@ def get_slack_client() -> WebClient:
     print(f"Token prefix: {token[:10]}...")
     client = WebClient(token=token)
     
-    # Validate scopes
-    validate_scopes(client)
+    # Validate client
+    validate_client(client)
     
     return client 
