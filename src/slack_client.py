@@ -3,42 +3,6 @@ from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-def validate_token_type(client: WebClient) -> None:
-    """
-    Validate that we're using a user token (xoxp) and not a bot token (xoxb).
-    Raises ValueError if the token is not a user token.
-    """
-    try:
-        print("Validating token with auth.test...")
-        response = client.auth_test()
-        print(f"Auth test response: {response}")
-        token_type = response.get("token_type")
-        
-        if "user" not in str(token_type).lower():
-            raise ValueError(
-                "Invalid token type. Please use a user token (xoxp) instead of a bot token. "
-                "User tokens are required for channel management operations."
-            )
-    except SlackApiError as e:
-        error_response = e.response.get("error", "unknown")
-        error_detail = {
-            "invalid_auth": "Token is invalid or expired",
-            "not_authed": "No authentication token provided",
-            "account_inactive": "Authentication token is for a deleted user or workspace",
-            "token_revoked": "Authentication token has been revoked",
-            "token_expired": "Authentication token has expired"
-        }.get(error_response, f"Unknown error: {error_response}")
-        
-        print(f"\nDebug information:")
-        print(f"Error code: {error_response}")
-        print(f"Full response: {e.response}")
-        print(f"\nToken information:")
-        token = os.getenv("SLACK_TOKEN", "")
-        print(f"Token prefix: {token[:10]}..." if token else "No token found")
-        print(f"Token length: {len(token)}" if token else "No token found")
-        
-        raise ValueError(f"Failed to validate token: {error_detail}")
-
 def validate_scopes(client: WebClient) -> None:
     """
     Validate that the token has the required scopes for channel management.
@@ -68,9 +32,6 @@ def get_slack_client() -> WebClient:
     """
     Create and return a Slack WebClient instance with validated token and scopes.
     
-    Required Token Type:
-    - User token (xoxp) is required, bot tokens are not supported
-    
     Required Scopes:
     - channels:write: For managing public channels
     - groups:write: For managing private channels
@@ -91,17 +52,10 @@ def get_slack_client() -> WebClient:
     if not token:
         raise ValueError("SLACK_TOKEN environment variable is not set in .env file")
     
-    if not token.startswith("xoxp-"):
-        raise ValueError(
-            "Invalid token format. Token must be a user token (starts with 'xoxp-'). "
-            "Bot tokens are not supported for channel management operations."
-        )
-    
-    print(f"Token format check: {'✓' if token.startswith('xoxp-') else '✗'}")
+    print(f"Token prefix: {token[:10]}...")
     client = WebClient(token=token)
     
-    # Validate token type and scopes
-    validate_token_type(client)
+    # Validate scopes
     validate_scopes(client)
     
     return client 
