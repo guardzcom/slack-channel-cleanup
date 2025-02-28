@@ -71,10 +71,40 @@ class ChannelActionHandler:
     
     async def archive_channel(self, channel_id: str, channel_name: str) -> ChannelActionResult:
         """Archive a channel."""
-        response = self.client.conversations_archive(channel=channel_id)
-        if response["ok"]:
-            return ChannelActionResult(True, f"Successfully archived channel {channel_name}")
-        return ChannelActionResult(False, f"Failed to archive channel {channel_name}")
+        try:
+            # First check if it's the general channel
+            channel_info = self.client.conversations_info(channel=channel_id)["channel"]
+            if channel_info.get("is_general"):
+                return ChannelActionResult(
+                    False,
+                    f"Cannot archive #{channel_name}: This is the workspace's general channel"
+                )
+                
+            response = self.client.conversations_archive(channel=channel_id)
+            
+            if response["ok"]:
+                return ChannelActionResult(
+                    True,
+                    f"Successfully archived #{channel_name}"
+                )
+                
+        except SlackApiError as e:
+            error = e.response["error"]
+            error_messages = {
+                "already_archived": f"#{channel_name} is already archived",
+                "cant_archive_general": f"Cannot archive #{channel_name}: This is the workspace's general channel",
+                "cant_archive_required": f"Cannot archive #{channel_name}: This is a required channel",
+                "not_in_channel": f"Cannot archive #{channel_name}: You must be a member of the channel",
+                "restricted_action": f"Cannot archive #{channel_name}: Your workspace settings prevent channel archiving",
+                "missing_scope": (
+                    f"Cannot archive #{channel_name}: Missing required permissions. "
+                    "Need channels:write for public channels or groups:write for private channels."
+                )
+            }
+            return ChannelActionResult(
+                False, 
+                error_messages.get(error, f"Failed to archive #{channel_name}: {error}")
+            )
     
     async def merge_channel(
         self,
@@ -86,19 +116,60 @@ class ChannelActionHandler:
         # Remove '#' prefix if present in target channel
         target_channel = target_channel.lstrip('#')
         
-        # Post message about the merge
-        message = f"🔄 This channel is being merged into #{target_channel}. Please join that channel to continue the discussion."
         try:
-            self.client.chat_postMessage(
-                channel=channel_id,
-                text=message,
-                parse="full"
+            # First verify the target channel exists
+            try:
+                channels = self.client.conversations_list(
+                    types="public_channel,private_channel",
+                    limit=200
+                )["channels"]
+                if not any(ch["name"] == target_channel for ch in channels):
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot merge #{channel_name}: Target channel #{target_channel} does not exist"
+                    )
+            except SlackApiError:
+                # If we can't verify the target channel, we'll still try to post the message
+                pass
+            
+            # Post message about the merge
+            message = (
+                f"🔄 *Channel Merge Notice*\n"
+                f"This channel is being merged into <#{target_channel}>.\n"
+                f"Please join that channel to continue the discussion."
             )
-        except SlackApiError as e:
-            return ChannelActionResult(False, f"Failed to post merge message in {channel_name}: {e.response['error']}")
-        
-        # Archive the channel
-        return await self.archive_channel(channel_id, channel_name)
+            
+            try:
+                self.client.chat_postMessage(
+                    channel=channel_id,
+                    text=message,
+                    mrkdwn=True  # Enable markdown formatting for the channel mention
+                )
+            except SlackApiError as e:
+                error = e.response["error"]
+                error_messages = {
+                    "channel_not_found": f"Cannot merge #{channel_name}: Channel not found",
+                    "not_in_channel": f"Cannot merge #{channel_name}: Bot must be invited to the channel first",
+                    "is_archived": f"Cannot merge #{channel_name}: Channel is already archived",
+                    "restricted_action": f"Cannot merge #{channel_name}: Workspace settings prevent posting messages",
+                    "missing_scope": (
+                        f"Cannot merge #{channel_name}: Missing required permissions. "
+                        "Need chat:write scope for posting messages."
+                    )
+                }
+                return ChannelActionResult(
+                    False,
+                    error_messages.get(error, f"Failed to post merge message in #{channel_name}: {error}")
+                )
+            
+            # Archive the channel
+            return await self.archive_channel(channel_id, channel_name)
+            
+        except Exception as e:
+            return ChannelActionResult(
+                False,
+                f"Unexpected error while merging #{channel_name}: {str(e)}"
+            )
     
     async def rename_channel(
         self,
@@ -108,17 +179,54 @@ class ChannelActionHandler:
     ) -> ChannelActionResult:
         """Rename a channel."""
         # Validate new name
-        if not new_name.islower() or ' ' in new_name or '.' in new_name:
+        if not new_name:
             return ChannelActionResult(
                 False,
-                f"Invalid new name '{new_name}' for {old_name}. Names must be lowercase, without spaces/periods."
+                f"Cannot rename {old_name}: New name cannot be empty"
             )
         
-        response = self.client.conversations_rename(
-            channel=channel_id,
-            name=new_name
-        )
+        if len(new_name) > 80:
+            return ChannelActionResult(
+                False,
+                f"Cannot rename {old_name}: New name exceeds 80 characters"
+            )
         
-        if response["ok"]:
-            return ChannelActionResult(True, f"Successfully renamed channel {old_name} to {new_name}")
-        return ChannelActionResult(False, f"Failed to rename channel {old_name}") 
+        # Check for valid characters (lowercase letters, numbers, hyphens, underscores)
+        if not all(c.islower() or c.isdigit() or c in '-_' for c in new_name):
+            return ChannelActionResult(
+                False,
+                f"Cannot rename {old_name}: Channel names can only contain lowercase letters, "
+                "numbers, hyphens, and underscores"
+            )
+        
+        try:
+            response = self.client.conversations_rename(
+                channel=channel_id,
+                name=new_name
+            )
+            
+            if response["ok"]:
+                # Store the actual name returned by Slack as it might be modified
+                actual_name = response["channel"]["name"]
+                if actual_name != new_name:
+                    return ChannelActionResult(
+                        True,
+                        f"Successfully renamed {old_name} to {actual_name} "
+                        "(name was modified to meet Slack's requirements)"
+                    )
+                return ChannelActionResult(
+                    True,
+                    f"Successfully renamed {old_name} to {new_name}"
+                )
+                
+        except SlackApiError as e:
+            error = e.response["error"]
+            error_messages = {
+                "not_authorized": "You don't have permission to rename this channel. "
+                                "Only channel creators, workspace admins, or channel managers can rename channels.",
+                "name_taken": f"Cannot rename {old_name}: The name '{new_name}' is already taken",
+                "invalid_name": f"Cannot rename {old_name}: Invalid channel name format",
+                "not_in_channel": f"Cannot rename {old_name}: You must be a member of the channel",
+                "is_archived": f"Cannot rename {old_name}: Channel is archived"
+            }
+            return ChannelActionResult(False, error_messages.get(error, f"Failed to rename {old_name}: {error}")) 

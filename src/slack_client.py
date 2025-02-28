@@ -12,10 +12,12 @@ def validate_client(client: WebClient) -> None:
         auth_response = client.auth_test()
         print(f"Connected as: {auth_response['user']} to workspace: {auth_response['team']}")
         
-        # Test channel listing (this will fail if we don't have the right scopes)
+        # Test channel listing with a single call for both public and private channels
         print("Testing channel access...")
-        channels_response = client.conversations_list(types="public_channel", limit=1)
-        private_channels_response = client.conversations_list(types="private_channel", limit=1)
+        channels_response = client.conversations_list(
+            types="public_channel,private_channel",
+            limit=1  # We only need to test access, not get all channels
+        )
         
         print("✓ Successfully validated channel read permissions")
         
