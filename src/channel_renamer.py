@@ -181,21 +181,16 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         print(f"\nNotes: {channel['notes']}")
     print("-" * 80)
     
-    # Extra confirmation for destructive actions
+    # Extra warning for destructive actions
     if action in [ChannelAction.ARCHIVE.value, ChannelAction.MERGE.value]:
         print("\n⚠️  WARNING: This is a destructive action that cannot be easily undone!")
         print("The channel will be archived and members will need to be manually re-added if restored.")
         if action == ChannelAction.MERGE.value:
             print("Members will need to manually join the target channel.")
             print(f"Consider posting an announcement in #{channel['name']} before proceeding.")
-        
-        confirm = input("Type the channel name to confirm: ")
-        if confirm != channel["name"]:
-            print("Channel name does not match. Action cancelled.")
-            return False
     
     while True:
-        response = input("\nApprove this action? (y/n/q to quit): ").lower()
+        response = input("\nPress 'y' to approve, 'n' to skip, or 'q' to quit: ").lower()
         if response == 'q':
             raise KeyboardInterrupt("User requested to quit")
         if response in ['y', 'n']:
