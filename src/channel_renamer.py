@@ -7,10 +7,13 @@ from .slack_client import get_slack_client
 from .channel_csv import export_channels_to_csv, read_channels_from_csv
 from .channel_actions import ChannelActionHandler, ChannelAction
 
-async def get_all_channels() -> List[Dict]:
+async def get_all_channels(csv_writer=None) -> List[Dict]:
     """
     Fetch all channels (public and private) from Slack workspace.
     Returns a list of channel dictionaries.
+    
+    Args:
+        csv_writer: Optional CSV writer to write channels as they're fetched
     
     Note: Requires both channels:read and groups:read scopes.
     """
@@ -36,6 +39,12 @@ async def get_all_channels() -> List[Dict]:
                 
             new_channels = response["channels"]
             channels.extend(new_channels)
+            
+            # Write new channels to CSV if writer provided
+            if csv_writer:
+                for channel in new_channels:
+                    write_channel_to_csv(csv_writer, channel)
+            
             print(f"Found {len(new_channels)} channels on page {page} (Total: {len(channels)})")
             
             # Handle pagination
@@ -324,11 +333,16 @@ async def main():
     try:
         if args.mode == "export":
             print("Fetching channels...")
-            channels = await get_all_channels()
-            print(f"Found {len(channels)} channels")
             
-            filename = export_channels_to_csv(channels, args.file)
-            print(f"\nChannels exported to: {filename}")
+            # Create CSV writer first
+            csv_file, csv_writer, filename = create_csv_writer(args.file)
+            try:
+                # Fetch channels and write them to CSV as we go
+                channels = await get_all_channels(csv_writer)
+                print(f"\nChannels exported to: {filename}")
+            finally:
+                csv_file.close()
+            
             print("\nNext steps:")
             print("1. Open the CSV file in your preferred spreadsheet application")
             print("2. Review the channels and set the 'action' column to one of:")

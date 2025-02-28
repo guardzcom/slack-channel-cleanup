@@ -14,6 +14,41 @@ CSV_HEADERS = [
     "notes"
 ]
 
+def get_default_filename() -> str:
+    """Generate default filename with timestamp."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"slack_channels_{timestamp}.csv"
+
+def create_csv_writer(filename: str = None):
+    """
+    Create and initialize a CSV writer.
+    Returns the file object and writer.
+    """
+    if not filename:
+        filename = get_default_filename()
+    
+    f = open(filename, 'w', newline='', encoding='utf-8')
+    writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+    writer.writeheader()
+    return f, writer, filename
+
+def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
+    """Write a single channel to CSV."""
+    # Convert timestamp to readable date
+    created = datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d")
+    
+    row = {
+        "channel_id": channel["id"],
+        "name": channel["name"],
+        "is_private": channel["is_private"],
+        "member_count": channel["num_members"],
+        "created_date": created,
+        "action": ChannelAction.KEEP.value,  # Default action
+        "target_value": "",  # Empty for merge/rename target
+        "notes": ""  # For any additional notes/comments
+    }
+    writer.writerow(row)
+
 def export_channels_to_csv(channels: List[Dict], filename: str = None) -> str:
     """
     Export channels to a CSV file.
@@ -25,29 +60,13 @@ def export_channels_to_csv(channels: List[Dict], filename: str = None) -> str:
     Returns:
         str: Path to the created CSV file
     """
-    if not filename:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"slack_channels_{timestamp}.csv"
+    f, writer, filename = create_csv_writer(filename)
     
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
-        writer.writeheader()
-        
+    try:
         for channel in channels:
-            # Convert timestamp to readable date
-            created = datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d")
-            
-            row = {
-                "channel_id": channel["id"],
-                "name": channel["name"],
-                "is_private": channel["is_private"],
-                "member_count": channel["num_members"],
-                "created_date": created,
-                "action": ChannelAction.KEEP.value,  # Default action
-                "target_value": "",  # Empty for merge/rename target
-                "notes": ""  # For any additional notes/comments
-            }
-            writer.writerow(row)
+            write_channel_to_csv(writer, channel)
+    finally:
+        f.close()
     
     return filename
 
