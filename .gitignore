@@ -1,9 +1,11 @@
 # Environment variables and secrets
 .env
 *.env
+.env.*
 
 # Generated CSV files
-slack_channels_*.csv
+*.csv
+*.csv.bak
 
 # Python
 __pycache__/
@@ -26,6 +28,13 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+.python-version
+
+# Virtual Environment
+venv/
+ENV/
+.venv
+.env
 
 # IDE
 .idea/
@@ -35,4 +44,5 @@ var/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+*.log 

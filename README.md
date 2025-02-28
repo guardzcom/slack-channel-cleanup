@@ -2,6 +2,17 @@
 
 A Python script to manage Slack channels in bulk, supporting operations like renaming, archiving, and merging channels. Perfect for workspace cleanup and reorganization.
 
+> 🤖 Built with [Cursor](https://cursor.sh/), the AI-first code editor, and its Claude-powered assistant.
+
+## Why?
+
+Managing Slack channels at scale can be tedious and error-prone. This tool helps you:
+- Clean up inactive channels
+- Reorganize channel naming
+- Merge redundant channels
+- Review changes before executing
+- Keep audit trail of all actions
+
 ## Features
 
 - 🔍 Export all channels (public and private) to CSV
@@ -21,6 +32,13 @@ A Python script to manage Slack channels in bulk, supporting operations like ren
   - `groups:write` - For managing private channels
   - `chat:write` - For posting messages (used for merge notifications)
 
+To get a Slack token:
+1. Go to [api.slack.com/apps](https://api.slack.com/apps)
+2. Create a new app in your workspace
+3. Add the required scopes under "OAuth & Permissions"
+4. Install the app to your workspace
+5. Copy the "User OAuth Token" (starts with `xoxp-`)
+
 ## Quick Start
 
 1. Clone and install:
@@ -38,6 +56,14 @@ SLACK_TOKEN=xoxp-your-token-here
 3. Export channels to CSV:
 ```bash
 python -m src.channel_renamer export -f channels.csv
+```
+
+This will create a CSV file with columns:
+```csv
+channel_id,name,is_private,member_count,created_date,action,target_value,notes
+C12345678,general,false,50,2022-01-01,keep,,
+C87654321,team-dev,true,10,2023-03-15,merge,team-engineering,Moving to unified team channel
+C98765432,old-project,false,5,2022-06-20,archive,,Inactive since 2023
 ```
 
 4. Edit the CSV file and set actions:
@@ -102,6 +128,18 @@ Options:
 - Check the Slack API responses for detailed error messages
 - Use `--dry-run` to validate changes before executing
 - Review CSV backups (`*.bak`) if needed
+
+## Contributing
+
+Contributions are welcome! Feel free to:
+- Report bugs
+- Suggest features
+- Submit pull requests
+
+## Credits
+
+- Built with [Cursor](https://cursor.sh/) and its Claude-powered AI assistant
+- Special thanks to the Slack API community
 
 ## License
 
