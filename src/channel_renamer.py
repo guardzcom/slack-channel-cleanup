@@ -208,6 +208,14 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     skipped = 0
     last_action = None
     
+    # Action descriptions for messages
+    action_desc = {
+        ChannelAction.KEEP.value: "keep as is",
+        ChannelAction.ARCHIVE.value: "archive",
+        ChannelAction.MERGE.value: "merge into",
+        ChannelAction.RENAME.value: "rename to"
+    }
+    
     print("\nExecuting channel actions:")
     print("=" * 80)
     print("For each action, you can:")
@@ -259,7 +267,15 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
             # Execute the approved action
             if dry_run:
                 successful += 1
-                print(f"✅ Would {desc}: {channel_name}")
+                channel_name = f"#{channel['name']}"
+                if channel.get("is_private"):
+                    channel_name = f"🔒 {channel_name}"
+                
+                action_message = action_desc[action]
+                if action in [ChannelAction.MERGE.value, ChannelAction.RENAME.value]:
+                    action_message = f"{action_message} {channel['target_value']}"
+                    
+                print(f"✅ Would {action_message}: {channel_name}")
                 continue
                 
             result = await handler.execute_action(

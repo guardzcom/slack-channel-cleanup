@@ -123,19 +123,23 @@ class ChannelActionHandler:
                     types="public_channel,private_channel",
                     limit=200
                 )["channels"]
-                if not any(ch["name"] == target_channel for ch in channels):
+                target = next((ch for ch in channels if ch["name"] == target_channel), None)
+                if not target:
                     return ChannelActionResult(
                         False,
                         f"Cannot merge #{channel_name}: Target channel #{target_channel} does not exist"
                     )
+                    
+                # Get the target channel ID for proper mention
+                target_id = target["id"]
             except SlackApiError:
                 # If we can't verify the target channel, we'll still try to post the message
-                pass
+                target_id = None
             
             # Post message about the merge
             message = (
                 f"🔄 *Channel Merge Notice*\n"
-                f"This channel is being merged into <#{target_channel}>.\n"
+                f"This channel is being merged into <#{target_id or target_channel}>.\n"
                 f"Please join that channel to continue the discussion."
             )
             
