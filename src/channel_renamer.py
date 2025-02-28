@@ -146,7 +146,9 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
                     print(f"Topic: {target['topic']['value']}")
                     
                 # Warn about merging into a smaller channel
-                if target.get("num_members", 0) < channel.get("member_count", 0):
+                source_members = int(channel.get("member_count", 0))
+                target_members = int(target.get("num_members", 0))
+                if target_members < source_members:
                     print("\n⚠️  Warning: Target channel has fewer members than source channel!")
             else:
                 print(f"\n⚠️  Warning: Target channel #{target_value} not found!")
@@ -196,7 +198,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         if response in ['y', 'n']:
             return response == 'y'
 
-async def execute_channel_actions(channels: List[Dict]) -> None:
+async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -> None:
     """Execute actions specified in the CSV file."""
     client = get_slack_client()
     handler = ChannelActionHandler(client)
@@ -216,6 +218,8 @@ async def execute_channel_actions(channels: List[Dict]) -> None:
     print("- Destructive actions (archive/merge) require additional confirmation")
     print("- Actions are sorted to process renames before archives/merges")
     print("- A backup of your CSV file will be created before processing")
+    if dry_run:
+        print("\n🔍 DRY RUN MODE - No changes will be made to channels")
     print("=" * 80)
     
     try:
@@ -253,6 +257,11 @@ async def execute_channel_actions(channels: List[Dict]) -> None:
                 break
             
             # Execute the approved action
+            if dry_run:
+                successful += 1
+                print(f"✅ Would {desc}: {channel_name}")
+                continue
+                
             result = await handler.execute_action(
                 channel_id=channel["channel_id"],
                 channel_name=channel["name"],
@@ -385,7 +394,7 @@ async def main():
                     print("Operation cancelled.")
                     return
             
-            await execute_channel_actions(channels)
+            await execute_channel_actions(channels, dry_run=args.dry_run)
             
     except ValueError as e:
         print(f"Configuration error: {str(e)}")
