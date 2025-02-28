@@ -4,6 +4,10 @@ A Python script to manage Slack channels in bulk, supporting operations like ren
 
 > 🤖 Built with [Cursor](https://cursor.sh/), the AI-first code editor, and its Claude-powered assistant.
 
+## ⚠️ Warning
+
+This tool performs bulk operations that can permanently affect your Slack workspace. While it includes safety features, you are responsible for any changes made to your channels. Please use thoughtfully!
+
 ## Why?
 
 Managing Slack channels at scale can be tedious and error-prone. This tool helps you:
@@ -39,21 +43,16 @@ To get a Slack token:
 4. Install the app to your workspace
 5. Copy the "User OAuth Token" (starts with `xoxp-`)
 
-## Quick Start
+## Setup
 
-1. Clone and install:
-```bash
-git clone https://github.com/yourusername/slack-channel-manager.git
-cd slack-channel-manager
-pip install -r requirements.txt
-```
-
-2. Create a `.env` file with your Slack token:
+Create a `.env` file with your Slack token:
 ```bash
 SLACK_TOKEN=xoxp-your-token-here
 ```
 
-3. Export channels to CSV:
+## Usage
+
+1. Export channels to CSV:
 ```bash
 python -m src.channel_renamer export -f channels.csv
 ```
@@ -66,18 +65,18 @@ C87654321,team-dev,true,10,2023-03-15,merge,team-engineering,Moving to unified t
 C98765432,old-project,false,5,2022-06-20,archive,,Inactive since 2023
 ```
 
-4. Edit the CSV file and set actions:
+2. Edit the CSV file and set actions:
 - `keep` - No changes (default)
 - `archive` - Archive the channel
 - `merge` - Merge into another channel (set target in `target_value`)
 - `rename` - Rename channel (set new name in `target_value`)
 
-5. Test your changes (dry run):
+3. Test your changes (dry run):
 ```bash
 python -m src.channel_renamer execute -f channels.csv --dry-run
 ```
 
-6. Execute changes:
+4. Execute changes:
 ```bash
 python -m src.channel_renamer execute -f channels.csv
 ```
