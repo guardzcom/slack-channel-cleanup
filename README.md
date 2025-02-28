@@ -1,4 +1,4 @@
-# Slack Channel Cleanup
+# Slack Channel Manager
 
 A Python script to manage Slack channels in bulk, supporting operations like renaming, archiving, and merging channels. Perfect for workspace cleanup and reorganization.
 
@@ -43,8 +43,8 @@ To get a Slack token:
 
 1. Clone and install:
 ```bash
-git clone https://github.com/yourusername/slack-channel-cleanup.git
-cd slack-channel-cleanup
+git clone https://github.com/yourusername/slack-channel-manager.git
+cd slack-channel-manager
 pip install -r requirements.txt
 ```
 
