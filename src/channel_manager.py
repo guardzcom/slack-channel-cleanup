@@ -168,11 +168,21 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
             else:
                 print(f"\n⚠️  Warning: Target channel #{target_value} not found!")
                 while True:
-                    response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                    response = input("\nPress 'r' to try a different target channel, 'n' to skip, or 'q' to quit: ").lower()
                     if response == 'q':
                         raise KeyboardInterrupt("User requested to quit")
                     if response == 'n':
                         return False
+                    if response == 'r':
+                        new_target = input("\nEnter new target channel name (without #): ").strip().lower()
+                        if not new_target:
+                            print("Name cannot be empty")
+                            continue
+                        if ' ' in new_target or '.' in new_target:
+                            print("Name cannot contain spaces or periods")
+                            continue
+                        channel["target_value"] = new_target
+                        return await get_user_approval(client, channel, action, new_target, current_channels)
         except SlackApiError:
             print(f"\n⚠️  Warning: Could not fetch target channel information")
             while True:
@@ -189,11 +199,18 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
             print("\n❌ Error: Channel name is too long!")
             print("Channel names must be 80 characters or less")
             while True:
-                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
                 if response == 'q':
                     raise KeyboardInterrupt("User requested to quit")
                 if response == 'n':
                     return False
+                if response == 'r':
+                    new_name = input("\nEnter new channel name (without #): ").strip().lower()
+                    if not new_name:
+                        print("Name cannot be empty")
+                        continue
+                    channel["target_value"] = new_name
+                    return await get_user_approval(client, channel, action, new_name, current_channels)
             
         # Check format
         if not target_value.islower() or ' ' in target_value or '.' in target_value:
@@ -203,33 +220,57 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
             print("- Not contain spaces or periods")
             print("- Only use letters, numbers, hyphens, and underscores")
             while True:
-                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
                 if response == 'q':
                     raise KeyboardInterrupt("User requested to quit")
                 if response == 'n':
                     return False
+                if response == 'r':
+                    new_name = input("\nEnter new channel name (without #): ").strip().lower()
+                    if not new_name:
+                        print("Name cannot be empty")
+                        continue
+                    channel["target_value"] = new_name
+                    return await get_user_approval(client, channel, action, new_name, current_channels)
             
         # Check valid characters
         if not all(c.islower() or c.isdigit() or c in '-_' for c in target_value):
             print("\n❌ Error: Channel name contains invalid characters!")
             print("Only lowercase letters, numbers, hyphens, and underscores are allowed")
             while True:
-                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
                 if response == 'q':
                     raise KeyboardInterrupt("User requested to quit")
                 if response == 'n':
                     return False
-            
+                if response == 'r':
+                    new_name = input("\nEnter new channel name (without #): ").strip().lower()
+                    if not new_name:
+                        print("Name cannot be empty")
+                        continue
+                    channel["target_value"] = new_name
+                    return await get_user_approval(client, channel, action, new_name, current_channels)
+        
         # Check if name is already taken (using current_channels if available)
         if current_channels:
             if any(ch["name"] == target_value for ch in current_channels):
                 print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
                 while True:
-                    response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                    response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
                     if response == 'q':
                         raise KeyboardInterrupt("User requested to quit")
                     if response == 'n':
                         return False
+                    if response == 'r':
+                        new_name = input("\nEnter new channel name (without #): ").strip().lower()
+                        if not new_name:
+                            print("Name cannot be empty")
+                            continue
+                        if ' ' in new_name or '.' in new_name:
+                            print("Name cannot contain spaces or periods")
+                            continue
+                        channel["target_value"] = new_name
+                        return await get_user_approval(client, channel, action, new_name, current_channels)
         else:
             try:
                 existing = client.conversations_list(
@@ -239,11 +280,21 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
                 if any(ch["name"] == target_value for ch in existing):
                     print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
                     while True:
-                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                        response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
                         if response == 'q':
                             raise KeyboardInterrupt("User requested to quit")
                         if response == 'n':
                             return False
+                        if response == 'r':
+                            new_name = input("\nEnter new channel name (without #): ").strip().lower()
+                            if not new_name:
+                                print("Name cannot be empty")
+                                continue
+                            if ' ' in new_name or '.' in new_name:
+                                print("Name cannot contain spaces or periods")
+                                continue
+                            channel["target_value"] = new_name
+                            return await get_user_approval(client, channel, action, new_name, current_channels)
             except SlackApiError:
                 print("\n⚠️  Warning: Could not validate channel name availability")
     

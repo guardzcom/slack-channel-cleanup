@@ -122,9 +122,11 @@ async def main():
                               ch["channel_id"] not in successful_channel_ids or 
                               ch["action"] != ChannelAction.ARCHIVE.value]
                     
-                    # Clear actions for successfully renamed channels only
+                    # Update renamed channels and clear their actions
                     for channel in channels:
                         if channel["channel_id"] in successful_channel_ids:
+                            if channel["action"] == ChannelAction.RENAME.value:
+                                channel["name"] = channel["target_value"]
                             channel["action"] = ChannelAction.KEEP.value
                             channel["target_value"] = ""
                     
