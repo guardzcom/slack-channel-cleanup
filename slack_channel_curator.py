@@ -179,6 +179,16 @@ async def main():
         # Remove channels that are no longer active
         channels = [ch for ch in channels if ch["channel_id"] in current_ids]
         
+        # Update existing channels with fresh data from Slack
+        for slack_channel in current_channels:
+            channel_id = slack_channel["id"]
+            # Find matching channel in our list
+            existing_channel = next((ch for ch in channels if ch["channel_id"] == channel_id), None)
+            if existing_channel:
+                # Update description to keep in sync with Slack
+                existing_channel["description"] = slack_channel.get("purpose", {}).get("value", "")
+                # Don't override any pending actions
+        
         # Add new channels
         for channel in current_channels:
             if channel["id"] not in existing_ids:
