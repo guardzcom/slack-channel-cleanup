@@ -62,7 +62,7 @@ class ChannelActionHandler:
                 return response
                 
             elif action == ChannelAction.UPDATE_DESCRIPTION.value:
-                if target_value is None:  # Allow empty string as valid description
+                if target_value is None or target_value.strip() == "":  # Don't allow empty descriptions
                     return ChannelActionResult(False, f"New description not specified for {channel_name}")
                 response = await self.update_description(channel_id, channel_name, target_value)
                 return response

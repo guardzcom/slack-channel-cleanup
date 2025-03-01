@@ -144,6 +144,13 @@ def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
         raise ValueError(
             f"Target value is required for {action} action on channel {channel.get('name')}"
         )
+        
+    # Validate target value for update_description action
+    if action == ChannelAction.UPDATE_DESCRIPTION.value:
+        if not channel.get('target_value') or channel.get('target_value').strip() == "":
+            raise ValueError(
+                f"Non-empty target value is required for {action} action on channel {channel.get('name')}"
+            )
 
 def validate_headers(headers: List[str]) -> None:
     """Validate that all required headers are present in the data structure."""
