@@ -157,9 +157,10 @@ Note: You must specify either --file OR --sheet, but not both.
   - The general/default channel
   - Required channels
   - Channels where you're not a member (unless you're an admin)
-- Cannot post redirect notices:
-  - To non-existent channels
-  - To archived channels
+- Redirect notices:
+  - Will attempt to post when archiving with a target channel
+  - If posting fails (e.g., not a member of the channel), a warning is shown and archiving continues
+  - Target channel must exist and not be archived
 - Cannot rename:
   - Archived channels
   - Channels without proper permissions (unless you're an admin)

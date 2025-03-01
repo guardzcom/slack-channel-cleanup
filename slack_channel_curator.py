@@ -183,11 +183,11 @@ async def main():
             print(f"\nUpdated: {args.sheet}")
         
         print("\nNext steps:")
-        print("1. Review the channels and set the 'action' column to one of:")
-        print("   - keep: No changes (default)")
-        print("   - archive: Archive the channel (optionally specify target in 'target_value')")
-        print("   - rename: Rename the channel (specify new name in 'target_value')")
-        print("2. For archive actions, optionally specify a target channel in 'target_value'")
+        print("1. Edit the spreadsheet and set actions:")
+        print("   - `keep` - No changes (default)")
+        print("   - `archive` - Archive the channel (optionally specify target channel in 'target_value' for redirect notice)")
+        print("   - `rename` - Rename channel (specify new name in 'target_value')")
+        print("2. For archive actions, optionally specify a target channel in 'target_value' (redirect notice will be attempted)")
         print("3. Run the script again to process your changes")
             
     except ValueError as e:

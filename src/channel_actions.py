@@ -144,12 +144,13 @@ class ChannelActionHandler:
                         )
                     except SlackApiError as e:
                         if e.response["error"] == "not_in_channel":
-                            return ChannelActionResult(
-                                False,
-                                f"Cannot archive #{channel_name}: Unable to post redirect notice (not in channel)"
-                            )
-                        # Continue with archive even if we couldn't post the message for other reasons
-                        pass
+                            print(f"\n⚠️  Warning: Could not post redirect notice in #{channel_name} (not a member)")
+                            print(f"The channel will be archived without a redirect message")
+                            # Continue with archive instead of returning error
+                        else:
+                            # For other errors, just log a warning and continue
+                            print(f"\n⚠️  Warning: Could not post redirect notice in #{channel_name}: {e.response['error']}")
+                            print(f"The channel will be archived without a redirect message")
                     
                 except SlackApiError:
                     return ChannelActionResult(
