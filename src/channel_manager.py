@@ -76,7 +76,10 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
 async def get_channel_info(client, channel_id: str) -> Dict:
     """Get detailed channel information."""
     try:
-        response = client.conversations_info(channel=channel_id)
+        response = client.conversations_info(
+            channel=channel_id,
+            include_num_members=True  # Request member count in response
+        )
         return response["channel"]
     except SlackApiError:
         return {}
@@ -108,7 +111,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     
     print("\n" + "=" * 80)
     print(f"Channel: {channel_name}")
-    print(f"Members: {channel.get('member_count', 'unknown')}")
+    print(f"Members: {channel_info.get('num_members', 'unknown')}")
     print(f"Created: {channel.get('created_date', 'unknown')}")
     if channel_info.get("purpose", {}).get("value"):
         print(f"Purpose: {channel_info['purpose']['value']}")
@@ -117,9 +120,16 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     
     # Show last activity if available
     if channel_info.get("last_read"):
-        from datetime import datetime
-        last_read = datetime.fromtimestamp(float(channel_info["last_read"]))
-        print(f"Last Activity: {last_read.strftime('%Y-%m-%d')}")
+        try:
+            from datetime import datetime
+            last_read = datetime.fromtimestamp(float(channel_info["last_read"]))
+            # Skip if date is Unix epoch (indicates no activity)
+            if last_read.year > 1970:
+                print(f"Last Activity: {last_read.strftime('%Y-%m-%d')}")
+            else:
+                print("Last Activity: No activity recorded")
+        except ValueError:
+            print("Last Activity: Unable to parse timestamp")
     
     print(f"\nProposed Action: {desc}")
     
@@ -151,16 +161,26 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
                     print(f"Topic: {target_info['topic']['value']}")
                     
                 # Warn about redirecting to a smaller channel
-                source_members = int(channel.get("member_count", 0))
-                target_members = int(target_info.get("num_members", 0))
+                source_members = int(channel.get("num_members", 0))
+                target_members = int(target_info.get('num_members', 0))
                 if target_members < source_members:
                     print("\n⚠️  Warning: Target channel has fewer members than source channel!")
             else:
                 print(f"\n⚠️  Warning: Target channel #{target_value} not found!")
-                return False
+                while True:
+                    response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                    if response == 'q':
+                        raise KeyboardInterrupt("User requested to quit")
+                    if response == 'n':
+                        return False
         except SlackApiError:
             print(f"\n⚠️  Warning: Could not fetch target channel information")
-            return False
+            while True:
+                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                if response == 'q':
+                    raise KeyboardInterrupt("User requested to quit")
+                if response == 'n':
+                    return False
     
     # For rename actions, validate the new name
     if action == ChannelAction.RENAME.value and target_value:
@@ -168,7 +188,12 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         if len(target_value) > 80:
             print("\n❌ Error: Channel name is too long!")
             print("Channel names must be 80 characters or less")
-            return False
+            while True:
+                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                if response == 'q':
+                    raise KeyboardInterrupt("User requested to quit")
+                if response == 'n':
+                    return False
             
         # Check format
         if not target_value.islower() or ' ' in target_value or '.' in target_value:
@@ -177,19 +202,34 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
             print("- Be lowercase")
             print("- Not contain spaces or periods")
             print("- Only use letters, numbers, hyphens, and underscores")
-            return False
+            while True:
+                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                if response == 'q':
+                    raise KeyboardInterrupt("User requested to quit")
+                if response == 'n':
+                    return False
             
         # Check valid characters
         if not all(c.islower() or c.isdigit() or c in '-_' for c in target_value):
             print("\n❌ Error: Channel name contains invalid characters!")
             print("Only lowercase letters, numbers, hyphens, and underscores are allowed")
-            return False
+            while True:
+                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                if response == 'q':
+                    raise KeyboardInterrupt("User requested to quit")
+                if response == 'n':
+                    return False
             
         # Check if name is already taken (using current_channels if available)
         if current_channels:
             if any(ch["name"] == target_value for ch in current_channels):
                 print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
-                return False
+                while True:
+                    response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                    if response == 'q':
+                        raise KeyboardInterrupt("User requested to quit")
+                    if response == 'n':
+                        return False
         else:
             try:
                 existing = client.conversations_list(
@@ -198,7 +238,12 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
                 )["channels"]
                 if any(ch["name"] == target_value for ch in existing):
                     print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
-                    return False
+                    while True:
+                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                        if response == 'q':
+                            raise KeyboardInterrupt("User requested to quit")
+                        if response == 'n':
+                            return False
             except SlackApiError:
                 print("\n⚠️  Warning: Could not validate channel name availability")
     
@@ -328,15 +373,33 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
                 channel_info = await get_channel_info(client, channel["channel_id"])
                 if not channel_info:
                     print(f"❌ Channel {channel['name']} no longer exists!")
-                    failed += 1
+                    while True:
+                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                        if response == 'q':
+                            raise KeyboardInterrupt("User requested to quit")
+                        if response == 'n':
+                            skipped += 1
+                            break
                     continue
                 if channel_info.get("is_archived"):
                     print(f"❌ Channel {channel['name']} is already archived!")
-                    failed += 1
+                    while True:
+                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                        if response == 'q':
+                            raise KeyboardInterrupt("User requested to quit")
+                        if response == 'n':
+                            skipped += 1
+                            break
                     continue
                 if channel_info.get("name") != channel["name"]:
                     print(f"❌ Channel has been renamed from {channel['name']} to {channel_info['name']}!")
-                    failed += 1
+                    while True:
+                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                        if response == 'q':
+                            raise KeyboardInterrupt("User requested to quit")
+                        if response == 'n':
+                            skipped += 1
+                            break
                     continue
                     
                 # Now execute the action
@@ -350,14 +413,26 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
                 if result.success:
                     successful += 1
                     print(f"✅ {result.message}")
+                    
+                    # Update channel name in our data after successful rename
+                    if action == ChannelAction.RENAME.value:
+                        channel["name"] = channel.get("target_value")
+                    
                     last_action = (channel, action, channel.get("target_value"))
                     successful_channel_ids.append(channel["channel_id"])  # Add to successful list
                 else:
                     failed += 1
                     print(f"❌ {result.message}")
             except Exception as e:
-                failed += 1
                 print(f"❌ Error processing {channel['name']}: {str(e)}")
+                while True:
+                    response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
+                    if response == 'q':
+                        raise KeyboardInterrupt("User requested to quit")
+                    if response == 'n':
+                        skipped += 1
+                        break
+                continue
             
             # Respect rate limits
             await asyncio.sleep(1)
@@ -374,9 +449,27 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
         print(f"Skipped actions: {skipped}")
         print(f"Total channels processed: {successful + failed + skipped}")
         
+        # Add summary of what was done
+        if successful > 0:
+            action_counts = {}
+            for channel in channels:
+                if channel.get("channel_id") in successful_channel_ids:
+                    action = channel.get("action", "").lower()
+                    action_counts[action] = action_counts.get(action, 0) + 1
+            
+            summary_parts = []
+            for action, count in action_counts.items():
+                if action == ChannelAction.ARCHIVE.value:
+                    summary_parts.append(f"{count} archived")
+                elif action == ChannelAction.RENAME.value:
+                    summary_parts.append(f"{count} renamed")
+            
+            if summary_parts:
+                print(f"\nCompleted: {', '.join(summary_parts)}")
+        
         if last_action and last_action[1] == ChannelAction.ARCHIVE.value:
             print("\nNote: To undo the last archive action, use the Slack UI:")
-            print(f"1. Go to channel #{last_action[0]['name']}")
+            print("1. Go to channel #" + last_action[0]['name'])
             print("2. Click the gear icon ⚙️")
             print("3. Select 'Additional options'")
             print("4. Choose 'Unarchive channel'")
