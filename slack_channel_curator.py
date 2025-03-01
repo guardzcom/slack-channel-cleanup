@@ -18,8 +18,8 @@ from src.channel_actions import ChannelAction
 from slack_sdk.errors import SlackApiError
 
 async def main():
-    """Main function to run the channel management script."""
-    parser = argparse.ArgumentParser(description="Slack Channel Management Tool")
+    """Main function to run the channel curation script."""
+    parser = argparse.ArgumentParser(description="Slack Channel Curation Tool")
     parser.add_argument(
         "--file",
         "-f",
@@ -44,7 +44,7 @@ async def main():
         parser.error("Cannot specify both --file and --sheet")
     
     try:
-        # Initialize sheet manager if using Google Sheets
+        # Initialize sheet curator if using Google Sheets
         sheet = None
         if args.sheet:
             print(f"Connecting to Google Sheets: {args.sheet}")
@@ -160,7 +160,7 @@ async def main():
             finally:
                 f.close()
             print(f"\nUpdated: {args.file}")
-        elif sheet:  # Reuse existing sheet manager
+        elif sheet:  # Reuse existing sheet curator
             sheet.write_channels(channels)
             print(f"\nUpdated: {args.sheet}")
         

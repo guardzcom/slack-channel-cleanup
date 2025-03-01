@@ -1,6 +1,6 @@
-# Slack Channel Manager
+# Slack Channel Curator
 
-A Python script to manage Slack channels in bulk, supporting operations like renaming and archiving channels. Perfect for workspace cleanup and reorganization.
+A Python script to thoughtfully curate Slack channels, supporting operations like renaming and archiving channels. Perfect for workspace cleanup and reorganization.
 
 > 🤖 Built with [Cursor](https://cursor.sh/), the AI-first code editor, and its Claude-powered assistant.
 
@@ -64,7 +64,7 @@ To use Google Sheets as your spreadsheet format:
 2. Create Service Account:
    - Go to "IAM & Admin" > "Service Accounts"
    - Click "Create Service Account"
-   - Name it (e.g., "slack-channel-manager")
+   - Name it (e.g., "slack-channel-curator")
    - Click "Create and Continue"
    - Skip role assignment
    - Click "Done"
@@ -84,7 +84,7 @@ To use Google Sheets as your spreadsheet format:
 
 5. Run the script with the `--sheet` option:
 ```bash
-python slack_channel_manager.py --sheet "YOUR-SHEET-URL"
+python slack_channel_curator.py --sheet "YOUR-SHEET-URL"
 ```
 
 The sheet will be automatically populated with your channels and kept in sync.
@@ -99,13 +99,13 @@ The script maintains a spreadsheet of all your Slack channels. Each time you run
 Choose your preferred format:
 ```bash
 # Using CSV format
-python slack_channel_manager.py -f channels.csv
+python slack_channel_curator.py -f channels.csv
 
 # Using Google Sheets
-python slack_channel_manager.py --sheet "YOUR-SHEET-URL"
+python slack_channel_curator.py --sheet "YOUR-SHEET-URL"
 
 # Test changes with dry run mode
-python slack_channel_manager.py -f channels.csv --dry-run
+python slack_channel_curator.py -f channels.csv --dry-run
 ```
 
 The spreadsheet has the following columns:
@@ -133,7 +133,7 @@ To make changes:
 ## Command Line Options
 
 ```bash
-python slack_channel_manager.py [options]
+python slack_channel_curator.py [options]
 
 Options:
   -f, --file FILE      Path to CSV file (cannot be used with --sheet)
