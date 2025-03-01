@@ -1,6 +1,5 @@
-import asyncio
-import argparse
 import os
+import asyncio
 from typing import List, Dict, Optional
 from slack_sdk.errors import SlackApiError
 from .slack_client import get_slack_client
@@ -8,9 +7,11 @@ from .channel_csv import (
     export_channels_to_csv,
     read_channels_from_csv,
     create_csv_writer,
-    write_channel_to_csv
+    write_channel_to_csv,
+    update_sheet_from_active_channels as update_csv
 )
-from .channel_actions import ChannelActionHandler, ChannelAction
+from .sheet_manager import SheetManager
+from .channel_actions import ChannelActionHandler, ChannelAction, ChannelStatus
 
 async def get_all_channels(csv_writer=None) -> List[Dict]:
     """
@@ -220,7 +221,6 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     print("\nNotes:")
     print("- Destructive actions (archive) require additional confirmation")
     print("- Actions are sorted to process renames before archives")
-    print("- A backup of your CSV file will be created before processing")
     if dry_run:
         print("\n🔍 DRY RUN MODE - No changes will be made to channels")
     print("=" * 80)
@@ -304,112 +304,4 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
             print(f"1. Go to channel #{last_action[0]['name']}")
             print("2. Click the gear icon ⚙️")
             print("3. Select 'Additional options'")
-            print("4. Choose 'Unarchive channel'")
-
-# Add backup functionality
-def backup_csv(filepath: str) -> str:
-    """Create a backup of the CSV file before processing."""
-    if not os.path.exists(filepath):
-        return ""
-        
-    backup_path = f"{filepath}.bak"
-    try:
-        import shutil
-        shutil.copy2(filepath, backup_path)
-        return backup_path
-    except Exception:
-        return ""
-
-async def main():
-    """Main function to run the channel management script."""
-    parser = argparse.ArgumentParser(description="Slack Channel Management Tool")
-    parser.add_argument(
-        "mode",
-        choices=["export", "execute"],
-        help="Mode of operation: 'export' to create CSV, 'execute' to run actions"
-    )
-    parser.add_argument(
-        "--file",
-        "-f",
-        help="CSV file path (output for export, input for execute)"
-    )
-    parser.add_argument(
-        "--yes",
-        "-y",
-        action="store_true",
-        help="Skip initial confirmation prompt"
-    )
-    parser.add_argument(
-        "--dry-run",
-        "-d",
-        action="store_true",
-        help="Show what would be done without making any changes"
-    )
-    
-    args = parser.parse_args()
-    
-    try:
-        if args.mode == "export":
-            print("Fetching channels...")
-            
-            # Create CSV writer first
-            csv_file, csv_writer, filename = create_csv_writer(args.file)
-            try:
-                # Fetch channels and write them to CSV as we go
-                channels = await get_all_channels(csv_writer)
-                print(f"\nChannels exported to: {filename}")
-            finally:
-                csv_file.close()
-            
-            print("\nNext steps:")
-            print("1. Open the CSV file in your preferred spreadsheet application")
-            print("2. Review the channels and set the 'action' column to one of:")
-            print("   - keep: Keep the channel as is (default)")
-            print("   - archive: Archive the channel")
-            print("   - rename: Rename the channel (specify new name in 'target_value')")
-            print("3. Save the CSV and run the script with 'execute' mode")
-            
-        else:  # execute mode
-            if not args.file:
-                parser.error("CSV file path is required for execute mode")
-            
-            # Create backup of CSV file
-            backup_path = backup_csv(args.file)
-            if backup_path:
-                print(f"Created backup of CSV file: {backup_path}")
-            
-            print(f"Reading actions from: {args.file}")
-            channels = read_channels_from_csv(args.file)
-            print(f"Found {len(channels)} channels to process")
-            
-            # Show summary of actions
-            actions = {}
-            for channel in channels:
-                action = channel["action"]
-                actions[action] = actions.get(action, 0) + 1
-            
-            print("\nAction Summary:")
-            for action, count in actions.items():
-                print(f"{action}: {count} channels")
-            
-            if args.dry_run:
-                print("\nDRY RUN MODE - No changes will be made")
-            
-            # Ask for confirmation to start
-            if not args.yes:
-                response = input("\nStart processing channels? (yes/no): ")
-                if response.lower() != "yes":
-                    print("Operation cancelled.")
-                    return
-            
-            await execute_channel_actions(channels, dry_run=args.dry_run)
-            
-    except ValueError as e:
-        print(f"Configuration error: {str(e)}")
-    except SlackApiError as e:
-        print(f"Slack API error: {str(e)}")
-    except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-
-if __name__ == "__main__":
-    asyncio.run(main()) 
+            print("4. Choose 'Unarchive channel'") 

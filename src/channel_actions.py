@@ -40,7 +40,7 @@ class ChannelActionHandler:
             target_value: Additional value needed for archive (target channel for redirect) or rename (new name)
         """
         try:
-            if action == ChannelAction.KEEP:
+            if action in [ChannelAction.KEEP]:
                 return ChannelActionResult(True, f"Channel {channel_name} kept as is")
                 
             elif action == ChannelAction.ARCHIVE:
@@ -72,28 +72,52 @@ class ChannelActionHandler:
             target_channel: Optional target channel name for redirect notice
         """
         try:
-            # First check if it's the general channel
-            channel_info = self.client.conversations_info(channel=channel_id)["channel"]
-            if channel_info.get("is_general"):
-                return ChannelActionResult(
-                    False,
-                    f"Cannot archive #{channel_name}: This is the workspace's general channel"
-                )
+            # First check channel info and status
+            try:
+                channel_info = self.client.conversations_info(channel=channel_id)["channel"]
+                
+                # Check if already archived
+                if channel_info.get("is_archived", False):
+                    return ChannelActionResult(
+                        False,
+                        f"#{channel_name} is already archived"
+                    )
+                
+                # Check if it's the general channel
+                if channel_info.get("is_general"):
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot archive #{channel_name}: This is the workspace's general channel"
+                    )
+            except SlackApiError as e:
+                if e.response["error"] == "channel_not_found":
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot archive #{channel_name}: Channel not found"
+                    )
+                raise
 
             # If target channel specified, handle redirect notice
             if target_channel:
                 target_channel = target_channel.lstrip('#')
                 try:
-                    # Verify target channel exists
+                    # Verify target channel exists and is not archived
                     channels = self.client.conversations_list(
                         types="public_channel,private_channel",
                         limit=200
                     )["channels"]
                     target = next((ch for ch in channels if ch["name"] == target_channel), None)
+                    
                     if not target:
                         return ChannelActionResult(
                             False,
                             f"Cannot archive #{channel_name}: Target channel #{target_channel} does not exist"
+                        )
+                    
+                    if target.get("is_archived", False):
+                        return ChannelActionResult(
+                            False,
+                            f"Cannot archive #{channel_name}: Target channel #{target_channel} is archived"
                         )
                     
                     # Get the target channel ID for proper mention
@@ -118,8 +142,13 @@ class ChannelActionHandler:
                             text=message,
                             mrkdwn=True
                         )
-                    except SlackApiError:
-                        # Continue with archive even if we couldn't post the message
+                    except SlackApiError as e:
+                        if e.response["error"] == "not_in_channel":
+                            return ChannelActionResult(
+                                False,
+                                f"Cannot archive #{channel_name}: Unable to post redirect notice (not in channel)"
+                            )
+                        # Continue with archive even if we couldn't post the message for other reasons
                         pass
                     
                 except SlackApiError:
@@ -176,7 +205,7 @@ class ChannelActionHandler:
             )
         
         # Check for valid characters (lowercase letters, numbers, hyphens, underscores)
-        if not all(c.islower() or c.isdigit() or c in '-_' for c in new_name):
+        if not all(c.islower() or c.isdigit() or c in '-_' for c in new_name) or '.' in new_name:
             return ChannelActionResult(
                 False,
                 f"Cannot rename {old_name}: Channel names can only contain lowercase letters, "

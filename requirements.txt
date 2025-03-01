@@ -1,2 +1,4 @@
-slack-sdk>=3.26.1
-python-dotenv>=1.0.0 
+slack-sdk>=3.19.5
+python-dotenv>=0.19.0
+google-auth>=2.6.0
+google-api-python-client>=2.70.0 

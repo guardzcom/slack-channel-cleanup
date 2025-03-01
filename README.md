@@ -19,8 +19,8 @@ Managing Slack channels at scale can be tedious and error-prone. This tool helps
 
 ## Features
 
-- 🔍 Export all channels (public and private) to CSV
-- 📝 Review and plan changes in your spreadsheet app
+- 🔍 Export all channels (public and private) to a spreadsheet
+- 📝 Review and plan changes in your preferred format (CSV or Google Sheets)
 - 🔄 Bulk actions: rename or archive channels (with optional redirect notices)
 - ✨ Interactive approval process with detailed channel info
 - 🛡️ Safe execution with dry-run mode and backups
@@ -52,49 +52,102 @@ Create a `.env` file with your Slack token:
 SLACK_TOKEN=xoxp-your-token-here
 ```
 
+## Google Sheets Integration
+
+To use Google Sheets as your spreadsheet format:
+
+1. Set up Google Cloud Project:
+   - Go to [Google Cloud Console](https://console.cloud.google.com)
+   - Create a new project or select an existing one
+   - Enable the Google Sheets API for your project
+
+2. Create Service Account:
+   - Go to "IAM & Admin" > "Service Accounts"
+   - Click "Create Service Account"
+   - Name it (e.g., "slack-channel-manager")
+   - Click "Create and Continue"
+   - Skip role assignment
+   - Click "Done"
+
+3. Download Credentials:
+   - Click on the newly created service account
+   - Go to "Keys" tab
+   - Click "Add Key" > "Create new key"
+   - Choose JSON format
+   - Save the downloaded file as `service-account.json` in your project directory
+
+4. Share your Google Sheet:
+   - Create a new Google Sheet
+   - Click "Share" in the top right
+   - Add the service account email (found in `service-account.json`) with "Editor" access
+   - Copy the sheet URL
+
+5. Run the script with the `--sheet` option:
+```bash
+python slack_channel_manager.py export --sheet "YOUR-SHEET-URL"
+```
+
+The sheet will be automatically populated with your channels and kept in sync.
+
 ## Usage
 
-1. Export channels to CSV:
+1. Export channels to a spreadsheet (choose ONE format):
 ```bash
-python -m src.channel_renamer export -f channels.csv
+# Using CSV format
+python slack_channel_manager.py export -f channels.csv
+
+# Using Google Sheets
+python slack_channel_manager.py export --sheet "YOUR-SHEET-URL"
 ```
 
-This will create a CSV file with columns:
-```csv
-channel_id,name,is_private,member_count,created_date,action,target_value,notes
-C12345678,general,false,50,2022-01-01,keep,,
-C87654321,team-dev,true,10,2023-03-15,archive,team-engineering,Moving to unified team channel
-C98765432,old-project,false,5,2022-06-20,archive,,Inactive since 2023
-```
+This will create a spreadsheet with the following columns:
+- channel_id: Slack's internal channel ID
+- name: Channel name
+- is_private: Whether the channel is private
+- member_count: Number of members
+- created_date: When the channel was created
+- action: What action to take (keep, archive, rename)
+- target_value: Target for rename or archive redirect
+- notes: Optional notes about the change
 
-2. Edit the CSV file and set actions:
+2. Edit your sheet and set actions:
 - `keep` - No changes (default)
-- `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice before archiving
+- `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice
 - `rename` - Rename channel (set new name in `target_value`)
 
-3. Test your changes (dry run):
+3. Test your changes (dry run, using the same format as export):
 ```bash
-python -m src.channel_renamer execute -f channels.csv --dry-run
+# Using CSV format
+python slack_channel_manager.py execute -f channels.csv --dry-run
+
+# Using Google Sheets
+python slack_channel_manager.py execute --sheet "YOUR-SHEET-URL" --dry-run
 ```
 
-4. Execute changes:
+4. Execute changes (using the same format as export):
 ```bash
-python -m src.channel_renamer execute -f channels.csv
+# Using CSV format
+python slack_channel_manager.py execute -f channels.csv
+
+# Using Google Sheets
+python slack_channel_manager.py execute --sheet "YOUR-SHEET-URL"
 ```
 
 ## Command Line Options
 
 ```bash
-python -m src.channel_renamer <mode> [options]
+python slack_channel_manager.py <mode> [options]
 
 Modes:
-  export                Export channels to CSV
-  execute               Execute actions from CSV
+  export                Export channels to create or update a spreadsheet
+  execute               Execute actions from a spreadsheet
 
 Options:
-  -f, --file FILE      CSV file path (required)
-  -y, --yes            Skip initial confirmation
+  -f, --file FILE      Path to CSV file (cannot be used with --sheet)
+  --sheet URL          Google Sheets URL (cannot be used with --file)
   -d, --dry-run        Simulate execution without making changes
+
+Note: You must specify either --file OR --sheet, but not both.
 ```
 
 ## Safety Features
@@ -102,7 +155,6 @@ Options:
 - ✅ Interactive approval for each action
 - ⚠️ Extra confirmation for destructive actions
 - 🔍 Dry run mode to preview changes
-- 💾 Automatic CSV backups
 - 🔒 Permission and name validation
 - 📝 Detailed logging and error reporting
 
@@ -124,13 +176,21 @@ Options:
   - No spaces or periods
   - Max 80 characters
   - Only letters, numbers, hyphens, underscores
+- Google Sheets specific:
+  - Requires a Google Cloud Project
+  - Service account must have editor access to the sheet
+  - Sheet URL must be in the correct format
 
 ## Debugging
 
 - Use VSCode's debug configurations (included in `.vscode/launch.json`)
 - Check the Slack API responses for detailed error messages
 - Use `--dry-run` to validate changes before executing
-- Review CSV backups (`*.bak`) if needed
+- Review version history (Google Sheets) or backup files (CSV) if needed
+- For Google Sheets specific issues:
+  - Verify service account permissions
+  - Check sheet sharing settings
+  - Ensure sheet URL is correct
 
 ## Contributing
 
@@ -139,18 +199,13 @@ Contributions are welcome! Feel free to:
 - Suggest features
 - Submit pull requests
 
-## Credits
-
-- Built with [Cursor](https://cursor.sh/) and its Claude-powered AI assistant
-- Special thanks to the Slack API community
-
-## License
-
-MIT License - Feel free to use and modify as needed.
-
 ## Security Note
 
-- Never commit your `.env` file
+- Never commit your `.env` file or `service-account.json`
 - Keep your Slack token secure
 - Review changes carefully before execution
-- Consider running `--dry-run` first 
+- Consider running `--dry-run` first
+- For Google Sheets:
+  - Keep service account credentials secure
+  - Only share sheets with necessary users
+  - Regularly review service account access
