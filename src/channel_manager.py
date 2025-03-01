@@ -589,7 +589,8 @@ async def process_single_channel(channel, handler, client, current_channels, dry
             channel_id=channel["channel_id"],
             channel_name=channel["name"],
             action=action,
-            target_value=channel.get("target_value", "")
+            target_value=channel.get("target_value", ""),
+            current_channels=current_channels
         )
         
         if result.success:

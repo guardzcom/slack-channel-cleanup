@@ -29,7 +29,8 @@ class ChannelActionHandler:
         channel_id: str,
         channel_name: str,
         action: str,
-        target_value: Optional[str] = None
+        target_value: Optional[str] = None,
+        current_channels: Optional[list] = None
     ) -> ChannelActionResult:
         """
         Execute the specified action on a channel.
@@ -39,6 +40,7 @@ class ChannelActionHandler:
             channel_name: The current channel name
             action: The action to perform (from ChannelAction)
             target_value: Additional value needed for archive (target channel for redirect) or rename (new name)
+            current_channels: Optional list of already-fetched channels to avoid refetching
         """
         try:
             if action == ChannelAction.KEEP.value:
@@ -48,7 +50,7 @@ class ChannelActionHandler:
                 return ChannelActionResult(False, f"Channel {channel_name} needs review - please change action from 'new'")
                 
             elif action == ChannelAction.ARCHIVE.value:
-                response = await self.archive_channel(channel_id, channel_name, target_value)
+                response = await self.archive_channel(channel_id, channel_name, target_value, current_channels)
                 return response
                 
             elif action == ChannelAction.RENAME.value:
@@ -66,7 +68,7 @@ class ChannelActionHandler:
         except Exception as e:
             return ChannelActionResult(False, f"Unexpected error for {channel_name}: {str(e)}")
     
-    async def archive_channel(self, channel_id: str, channel_name: str, target_channel: Optional[str] = None) -> ChannelActionResult:
+    async def archive_channel(self, channel_id: str, channel_name: str, target_channel: Optional[str] = None, current_channels: Optional[list] = None) -> ChannelActionResult:
         """
         Archive a channel. If target_channel is provided, post a redirect notice before archiving.
         
@@ -74,6 +76,7 @@ class ChannelActionHandler:
             channel_id: The channel ID to archive
             channel_name: The name of the channel to archive
             target_channel: Optional target channel name for redirect notice
+            current_channels: Optional list of already-fetched channels to avoid refetching
         """
         try:
             # First check channel info and status
@@ -105,12 +108,35 @@ class ChannelActionHandler:
             if target_channel:
                 target_channel = target_channel.lstrip('#')
                 try:
-                    # Verify target channel exists and is not archived
-                    channels = self.client.conversations_list(
-                        types="public_channel,private_channel",
-                        limit=200
-                    )["channels"]
-                    target = next((ch for ch in channels if ch["name"] == target_channel), None)
+                    # First check if we already have the channels list
+                    target = None
+                    
+                    if current_channels:
+                        # Use the already-fetched channel list
+                        target = next((ch for ch in current_channels if ch["name"] == target_channel), None)
+                    else:
+                        # Fetch channels if we don't have them
+                        cursor = None
+                        
+                        # Paginate through all channels to find the target
+                        while True and not target:
+                            response = self.client.conversations_list(
+                                types="public_channel,private_channel",
+                                limit=200,
+                                cursor=cursor
+                            )
+                            
+                            channels = response["channels"]
+                            found_target = next((ch for ch in channels if ch["name"] == target_channel), None)
+                            
+                            if found_target:
+                                target = found_target
+                                break
+                            
+                            # Check if there are more pages
+                            cursor = response.get("response_metadata", {}).get("next_cursor")
+                            if not cursor:
+                                break
                     
                     if not target:
                         return ChannelActionResult(
