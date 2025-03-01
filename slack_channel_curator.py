@@ -166,7 +166,7 @@ async def main():
         # Add new channels
         for channel in current_channels:
             if channel["id"] not in existing_ids:
-                new_channel = create_channel_dict(channel)
+                new_channel = create_channel_dict(channel, is_new=True)
                 channels.append(new_channel)
         
         # Write to spreadsheet
@@ -184,7 +184,8 @@ async def main():
         
         print("\nNext steps:")
         print("1. Edit the spreadsheet and set actions:")
-        print("   - `keep` - No changes (default)")
+        print("   - `new` - Newly discovered channels that need review")
+        print("   - `keep` - No changes (default for existing channels)")
         print("   - `archive` - Archive the channel (optionally specify target channel in 'target_value' for redirect notice)")
         print("   - `rename` - Rename channel (specify new name in 'target_value')")
         print("2. For archive actions, optionally specify a target channel in 'target_value' (redirect notice will be attempted)")

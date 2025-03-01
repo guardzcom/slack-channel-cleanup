@@ -8,6 +8,7 @@ class ChannelAction(str, Enum):
     KEEP = "keep"
     ARCHIVE = "archive"
     RENAME = "rename"
+    NEW = "new"
     
     @classmethod
     def values(cls) -> list[str]:
@@ -40,14 +41,17 @@ class ChannelActionHandler:
             target_value: Additional value needed for archive (target channel for redirect) or rename (new name)
         """
         try:
-            if action in [ChannelAction.KEEP]:
+            if action == ChannelAction.KEEP.value:
                 return ChannelActionResult(True, f"Channel {channel_name} kept as is")
                 
-            elif action == ChannelAction.ARCHIVE:
+            elif action == ChannelAction.NEW.value:
+                return ChannelActionResult(False, f"Channel {channel_name} needs review - please change action from 'new'")
+                
+            elif action == ChannelAction.ARCHIVE.value:
                 response = await self.archive_channel(channel_id, channel_name, target_value)
                 return response
                 
-            elif action == ChannelAction.RENAME:
+            elif action == ChannelAction.RENAME.value:
                 if not target_value:
                     return ChannelActionResult(False, f"New name not specified for renaming {channel_name}")
                 response = await self.rename_channel(channel_id, channel_name, target_value)

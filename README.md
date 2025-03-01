@@ -128,7 +128,8 @@ Optional columns:
 
 To make changes:
 1. Edit the spreadsheet and set actions:
-   - `keep` - No changes (default)
+   - `new` - Newly discovered channel that needs review
+   - `keep` - No changes (default for existing channels)
    - `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice
    - `rename` - Rename channel (set new name in `target_value`)
 2. Run the script again to process your changes

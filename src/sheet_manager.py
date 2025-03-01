@@ -155,7 +155,7 @@ class SheetManager:
         values = [headers]
         
         for channel in channels:
-            if clear_actions and channel.get("action") != ChannelAction.KEEP.value:
+            if clear_actions and channel.get("action") not in [ChannelAction.KEEP.value, ChannelAction.NEW.value]:
                 channel["action"] = ChannelAction.KEEP.value
                 channel["target_value"] = ""
             values.append([channel.get(h, '') for h in headers])
@@ -176,7 +176,7 @@ class SheetManager:
         # Add new channels
         for channel in active_channels:
             if channel["id"] not in existing_channel_ids:
-                existing_channels.append(create_channel_dict(channel))
+                existing_channels.append(create_channel_dict(channel, is_new=True))
         
         # Write back with cleared actions
         self.write_channels(existing_channels, clear_actions=True) 

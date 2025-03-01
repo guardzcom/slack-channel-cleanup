@@ -55,10 +55,14 @@ def create_csv_writer(filename: str = None):
     except IOError as e:
         raise IOError(f"Failed to create CSV file {filename}: {str(e)}")
 
-def create_channel_dict(channel: Dict) -> Dict:
+def create_channel_dict(channel: Dict, is_new: bool = True) -> Dict:
     """
     Create a standardized channel dictionary from Slack channel data.
     Converts raw Slack API data into our standard data structure.
+    
+    Args:
+        channel: Raw channel data from Slack API
+        is_new: Whether this is a newly discovered channel
     """
     # Get last activity from latest message timestamp if available
     last_activity = ""
@@ -74,7 +78,7 @@ def create_channel_dict(channel: Dict) -> Dict:
     result = {
         "channel_id": channel["id"],
         "name": channel["name"],
-        "action": ChannelAction.KEEP.value,
+        "action": ChannelAction.NEW.value if is_new else ChannelAction.KEEP.value,
         "target_value": ""
     }
     
@@ -96,7 +100,7 @@ def create_channel_dict(channel: Dict) -> Dict:
 
 def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
     """Write a single channel to CSV file."""
-    row = create_channel_dict(channel)
+    row = create_channel_dict(channel, is_new=False)
     writer.writerow(row)
 
 def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
@@ -127,10 +131,10 @@ def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
             "Slack Connect channels must be disconnected by workspace admins first."
         )
     
-    # Validate target value is empty for keep action
-    if action == ChannelAction.KEEP.value and channel.get('target_value'):
+    # Validate target value is empty for keep and new actions
+    if action in [ChannelAction.KEEP.value, ChannelAction.NEW.value] and channel.get('target_value'):
         raise ValueError(
-            f"Target value must be empty for 'keep' action on channel {channel.get('name')}"
+            f"Target value must be empty for '{action}' action on channel {channel.get('name')}"
         )
     
     # Validate target value for rename action
