@@ -10,7 +10,8 @@ from src.channel_manager import (
 )
 from src.channel_csv import (
     read_channels_from_csv,
-    create_csv_writer
+    create_csv_writer,
+    create_channel_dict
 )
 from src.sheet_manager import SheetManager
 from src.channel_actions import ChannelAction
@@ -116,6 +117,12 @@ async def main():
                 
                 # Clear successful actions
                 if not args.dry_run and successful_channel_ids:
+                    # Remove archived channels and clear actions for renamed ones
+                    channels = [ch for ch in channels if 
+                              ch["channel_id"] not in successful_channel_ids or 
+                              ch["action"] != ChannelAction.ARCHIVE.value]
+                    
+                    # Clear actions for remaining channels (renames)
                     for channel in channels:
                         if channel["channel_id"] in successful_channel_ids:
                             channel["action"] = ChannelAction.KEEP.value
@@ -133,26 +140,13 @@ async def main():
         current_ids = {ch["id"] for ch in current_channels}
         existing_ids = {ch["channel_id"] for ch in channels}
         
-        # Mark channels that are no longer active
-        for channel in channels:
-            if channel["channel_id"] not in current_ids:
-                channel["notes"] = "NO LONGER ACTIVE: " + channel.get("notes", "")
-                channel["action"] = ChannelAction.KEEP.value  # Clear any pending actions
-                channel["target_value"] = ""  # Clear any target values
+        # Remove channels that are no longer active
+        channels = [ch for ch in channels if ch["channel_id"] in current_ids]
         
         # Add new channels
         for channel in current_channels:
             if channel["id"] not in existing_ids:
-                new_channel = {
-                    "channel_id": channel["id"],
-                    "name": channel["name"],
-                    "is_private": str(channel["is_private"]).lower(),
-                    "member_count": str(channel["num_members"]),
-                    "created_date": datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d"),
-                    "action": ChannelAction.KEEP.value,
-                    "target_value": "",
-                    "notes": ""
-                }
+                new_channel = create_channel_dict(channel)
                 channels.append(new_channel)
         
         # Write to spreadsheet

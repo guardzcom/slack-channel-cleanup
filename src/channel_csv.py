@@ -45,6 +45,19 @@ def create_csv_writer(filename: str = None):
     except IOError as e:
         raise IOError(f"Failed to create CSV file {filename}: {str(e)}")
 
+def create_channel_dict(channel: Dict) -> Dict:
+    """Create a standardized channel dictionary from Slack channel data."""
+    return {
+        "channel_id": channel["id"],
+        "name": channel["name"],
+        "is_private": str(channel["is_private"]).lower(),
+        "member_count": str(channel["num_members"]),
+        "created_date": datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d"),
+        "action": ChannelAction.KEEP.value,
+        "target_value": "",
+        "notes": ""
+    }
+
 def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
     """
     Write a single channel to CSV.
@@ -53,63 +66,54 @@ def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
         writer: CSV writer
         channel: Channel data
     """
-    # Convert timestamp to readable date
-    created = datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d")
-    
-    row = {
-        "channel_id": channel["id"],
-        "name": channel["name"],
-        "is_private": str(channel["is_private"]).lower(),
-        "member_count": str(channel["num_members"]),
-        "created_date": created,
-        "action": ChannelAction.KEEP.value,
-        "target_value": "",  # Empty for rename target or archive redirect
-        "notes": ""  # For any additional notes/comments
-    }
+    row = create_channel_dict(channel)
     writer.writerow(row)
 
-def read_channels_from_csv(filename: str) -> List[Dict]:
-    """
-    Read channel actions from a CSV file.
+def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
+    """Validate channel data, raising ValueError if invalid.
     
     Args:
-        filename: Path to the CSV file
-        
-    Returns:
-        List of dictionaries containing channel information and actions
-        
-    Raises:
-        ValueError: If CSV format is invalid
-        IOError: If file cannot be read
+        channel: Channel dictionary to validate
+        validate_headers: Whether to validate required headers exist
     """
+    if validate_headers:
+        missing_headers = set(CSV_HEADERS) - set(channel.keys())
+        if missing_headers:
+            raise ValueError(f"Missing required headers: {', '.join(missing_headers)}")
+    
+    # Validate action
+    action = channel.get('action', '').lower() or ChannelAction.KEEP.value
+    if action not in ChannelAction.values():
+        raise ValueError(
+            f"Invalid action '{action}' for channel {channel.get('name')}. "
+            f"Must be one of: {', '.join(ChannelAction.values())}"
+        )
+    
+    # Validate target value for rename action
+    if action == ChannelAction.RENAME.value and not channel.get('target_value'):
+        raise ValueError(
+            f"Target value is required for {action} action on channel {channel.get('name')}"
+        )
+
+def validate_headers(headers: List[str]) -> None:
+    """Validate that all required headers are present."""
+    missing = set(CSV_HEADERS) - set(headers)
+    if missing:
+        raise ValueError(f"Missing required headers: {', '.join(missing)}")
+
+def read_channels_from_csv(filename: str) -> List[Dict]:
+    """Read channel actions from a CSV file."""
     if not os.path.exists(filename):
         raise IOError(f"CSV file not found: {filename}")
         
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
-            
-            # Validate headers
-            missing_headers = set(CSV_HEADERS) - set(reader.fieldnames)
-            if missing_headers:
-                raise ValueError(f"CSV file is missing required headers: {', '.join(missing_headers)}")
+            validate_headers(reader.fieldnames)
             
             channels = []
             for row in reader:
-                # Validate action
-                action = row["action"].lower()
-                if action not in ChannelAction.values():
-                    raise ValueError(
-                        f"Invalid action '{action}' for channel {row['name']}. "
-                        f"Must be one of: {', '.join(ChannelAction.values())}"
-                    )
-                
-                # Validate target value for rename action
-                if action == ChannelAction.RENAME.value and not row["target_value"]:
-                    raise ValueError(
-                        f"Target value is required for {action} action on channel {row['name']}"
-                    )
-                
+                validate_channel(row)
                 channels.append(row)
             
             return channels

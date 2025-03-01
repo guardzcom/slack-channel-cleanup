@@ -6,7 +6,12 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from .channel_actions import ChannelAction
-from .channel_csv import CSV_HEADERS
+from .channel_csv import (
+    CSV_HEADERS,
+    create_channel_dict,
+    validate_channel,
+    validate_headers
+)
 
 # If modifying these scopes, delete the token.json file.
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -119,80 +124,48 @@ class SheetManager:
             return []
         
         headers = values[0]
-        channels = []
+        validate_headers(headers)
         
+        channels = []
         for row in values[1:]:
             # Pad row with empty strings if needed
             row_data = row + [''] * (len(headers) - len(row))
             channel = dict(zip(headers, row_data))
-            
-            # Validate action
-            action = channel.get('action', '').lower() or ChannelAction.KEEP.value
-            if action not in ChannelAction.values():
-                raise ValueError(
-                    f"Invalid action '{action}' for channel {channel.get('name')}. "
-                    f"Must be one of: {', '.join(ChannelAction.values())}"
-                )
-            
-            # Validate target value for rename action
-            if action == ChannelAction.RENAME.value and not channel.get('target_value'):
-                raise ValueError(
-                    f"Target value is required for {action} action on channel {channel.get('name')}"
-                )
-            
+            validate_channel(channel)
             channels.append(channel)
         
         return channels
     
-    def update_from_active_channels(self, active_channels: List[Dict]) -> None:
-        """Update sheet with current channels and clear completed actions.
+    def write_channels(self, channels: List[Dict], clear_actions: bool = False) -> None:
+        """Write channels to the sheet.
         
         Args:
-            active_channels: List of currently active channels from Slack
-            
-        Note: This will clear any completed actions and add newly discovered channels.
+            channels: List of channels to write
+            clear_actions: Whether to clear any actions (set to keep)
         """
+        headers = list(CSV_HEADERS)
+        values = [headers]
+        
+        for channel in channels:
+            if clear_actions and channel.get("action") != ChannelAction.KEEP.value:
+                channel["action"] = ChannelAction.KEEP.value
+                channel["target_value"] = ""
+            values.append([channel.get(h, '') for h in headers])
+        
+        self._update_values(values)
+    
+    def update_from_active_channels(self, active_channels: List[Dict]) -> None:
+        """Update sheet with current channels and clear completed actions."""
         # Get existing channels
         existing_channels = self.read_channels()
         
         # Create lookup of active channel IDs
         existing_channel_ids = {ch.get("channel_id") for ch in existing_channels}
         
-        # Prepare new values
-        headers = list(CSV_HEADERS)  # Use same headers as CSV
-        values = [headers]
-        
-        # First add existing channels with cleared actions
-        for channel in existing_channels:
-            if channel.get("action") != ChannelAction.KEEP.value:
-                channel["action"] = ChannelAction.KEEP.value
-                channel["target_value"] = ""
-            values.append([channel.get(h, '') for h in headers])
-        
-        # Then add new channels
+        # Add new channels
         for channel in active_channels:
             if channel["id"] not in existing_channel_ids:
-                row = {
-                    "channel_id": channel["id"],
-                    "name": channel["name"],
-                    "is_private": str(channel["is_private"]).lower(),
-                    "member_count": str(channel["num_members"]),
-                    "created_date": datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d"),
-                    "action": ChannelAction.KEEP.value,
-                    "target_value": "",
-                    "notes": ""
-                }
-                values.append([row.get(h, '') for h in headers])
+                existing_channels.append(create_channel_dict(channel))
         
-        # Update the sheet
-        self._update_values(values)
-    
-    def write_channels(self, channels: List[Dict]) -> None:
-        """Write channels to the sheet, preserving all data except clearing actions."""
-        headers = list(CSV_HEADERS)
-        values = [headers]
-        
-        for channel in channels:
-            values.append([channel.get(h, '') for h in headers])
-        
-        self._update_values(values) 
+        # Write back with cleared actions
+        self.write_channels(existing_channels, clear_actions=True) 
