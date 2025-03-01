@@ -145,12 +145,12 @@ class SheetManager:
         return channels
     
     def update_from_active_channels(self, active_channels: List[Dict]) -> None:
-        """Update sheet with current channels and clear executed actions.
+        """Update sheet with current channels and clear completed actions.
         
         Args:
             active_channels: List of currently active channels from Slack
             
-        Note: This will clear any executed actions and add newly discovered channels.
+        Note: This will clear any completed actions and add newly discovered channels.
         """
         # Get existing channels
         existing_channels = self.read_channels()

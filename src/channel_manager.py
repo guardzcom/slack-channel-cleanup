@@ -4,11 +4,9 @@ from typing import List, Dict, Optional
 from slack_sdk.errors import SlackApiError
 from .slack_client import get_slack_client
 from .channel_csv import (
-    export_channels_to_csv,
     read_channels_from_csv,
     create_csv_writer,
-    write_channel_to_csv,
-    update_sheet_from_active_channels as update_csv
+    write_channel_to_csv
 )
 from .sheet_manager import SheetManager
 from .channel_actions import ChannelActionHandler, ChannelAction
@@ -195,7 +193,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
             return response == 'y'
 
 async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -> List[str]:
-    """Execute actions specified in the CSV file.
+    """Process pending actions for the specified channels.
     
     Returns:
         List of channel IDs that were successfully processed

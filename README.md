@@ -19,7 +19,7 @@ Managing Slack channels at scale can be tedious and error-prone. This tool helps
 
 ## Features
 
-- 🔍 Export all channels (public and private) to a spreadsheet
+- 🔍 Maintains a spreadsheet of all channels (public and private)
 - 📝 Review and plan changes in your preferred format (CSV or Google Sheets)
 - 🔄 Bulk actions: rename or archive channels (with optional redirect notices)
 - ✨ Interactive approval process with detailed channel info
@@ -84,23 +84,31 @@ To use Google Sheets as your spreadsheet format:
 
 5. Run the script with the `--sheet` option:
 ```bash
-python slack_channel_manager.py export --sheet "YOUR-SHEET-URL"
+python slack_channel_manager.py --sheet "YOUR-SHEET-URL"
 ```
 
 The sheet will be automatically populated with your channels and kept in sync.
 
 ## Usage
 
-1. Export channels to a spreadsheet (choose ONE format):
+The script maintains a spreadsheet of all your Slack channels. Each time you run it, it will:
+1. Process any pending actions from the spreadsheet
+2. Update the channel list with any new channels
+3. Keep the spreadsheet in sync with your workspace
+
+Choose your preferred format:
 ```bash
 # Using CSV format
-python slack_channel_manager.py export -f channels.csv
+python slack_channel_manager.py -f channels.csv
 
 # Using Google Sheets
-python slack_channel_manager.py export --sheet "YOUR-SHEET-URL"
+python slack_channel_manager.py --sheet "YOUR-SHEET-URL"
+
+# Test changes with dry run mode
+python slack_channel_manager.py -f channels.csv --dry-run
 ```
 
-This will create a spreadsheet with the following columns:
+The spreadsheet has the following columns:
 - channel_id: Slack's internal channel ID
 - name: Channel name
 - is_private: Whether the channel is private
@@ -110,37 +118,22 @@ This will create a spreadsheet with the following columns:
 - target_value: Target for rename or archive redirect
 - notes: Optional notes about the change
 
-2. Edit your sheet and set actions:
-- `keep` - No changes (default)
-- `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice
-- `rename` - Rename channel (set new name in `target_value`)
-
-3. Test your changes (dry run, using the same format as export):
-```bash
-# Using CSV format
-python slack_channel_manager.py execute -f channels.csv --dry-run
-
-# Using Google Sheets
-python slack_channel_manager.py execute --sheet "YOUR-SHEET-URL" --dry-run
-```
-
-4. Execute changes (using the same format as export):
-```bash
-# Using CSV format
-python slack_channel_manager.py execute -f channels.csv
-
-# Using Google Sheets
-python slack_channel_manager.py execute --sheet "YOUR-SHEET-URL"
-```
+To make changes:
+1. Edit the spreadsheet and set actions:
+   - `keep` - No changes (default)
+   - `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice
+   - `rename` - Rename channel (set new name in `target_value`)
+2. Run the script again to process your changes
+3. The script will:
+   - Show you each proposed change
+   - Ask for confirmation
+   - Execute approved changes
+   - Update the spreadsheet to reflect the changes
 
 ## Command Line Options
 
 ```bash
-python slack_channel_manager.py <mode> [options]
-
-Modes:
-  export                Export channels to create or update a spreadsheet
-  execute               Execute actions from a spreadsheet
+python slack_channel_manager.py [options]
 
 Options:
   -f, --file FILE      Path to CSV file (cannot be used with --sheet)
