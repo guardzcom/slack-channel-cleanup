@@ -122,13 +122,29 @@ async def main():
                               ch["channel_id"] not in successful_channel_ids or 
                               ch["action"] != ChannelAction.ARCHIVE.value]
                     
-                    # Clear actions for remaining channels (renames)
+                    # Clear actions for successfully renamed channels only
                     for channel in channels:
                         if channel["channel_id"] in successful_channel_ids:
                             channel["action"] = ChannelAction.KEEP.value
                             channel["target_value"] = ""
+                    
+                    # Write back just the changes after actions
+                    if args.file:
+                        f, writer, _ = create_csv_writer(args.file)
+                        try:
+                            for channel in channels:
+                                writer.writerow(channel)
+                        finally:
+                            f.close()
+                        print(f"\nUpdated: {args.file}")
+                    elif sheet:
+                        sheet.write_channels(channels)
+                        print(f"\nUpdated: {args.sheet}")
+                    
+                    # Exit after handling actions
+                    return
         
-        # Get current channels
+        # If no actions were processed, do a full refresh of channels
         print("\nFetching current channels...")
         current_channels = await get_all_channels()
         

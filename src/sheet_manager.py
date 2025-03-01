@@ -117,6 +117,14 @@ class SheetManager:
             body={'values': values}
         ).execute()
     
+    def _clear_all_values(self) -> None:
+        """Clear all values in the sheet except the header row."""
+        self.sheet.values().clear(
+            spreadsheetId=self.sheet_id,
+            range=f"'{self.tab_name}'!A2:Z",
+            body={}
+        ).execute()
+    
     def read_channels(self) -> List[Dict]:
         """Read channels from the sheet."""
         values = self._get_all_values()
@@ -152,6 +160,9 @@ class SheetManager:
                 channel["target_value"] = ""
             values.append([channel.get(h, '') for h in headers])
         
+        # First clear all values (except header)
+        self._clear_all_values()
+        # Then write new values
         self._update_values(values)
     
     def update_from_active_channels(self, active_channels: List[Dict]) -> None:
