@@ -43,21 +43,57 @@ async def main():
         parser.error("Cannot specify both --file and --sheet")
     
     try:
+        # Initialize sheet manager if using Google Sheets
+        sheet = None
+        if args.sheet:
+            print(f"Connecting to Google Sheets: {args.sheet}")
+            sheet = SheetManager(args.sheet)
+        
         # Read existing channels and process any actions
         channels = None
         if args.file and os.path.exists(args.file):
             print(f"Reading from: {args.file}")
             channels = read_channels_from_csv(args.file)
-        elif args.sheet:
+        elif sheet:
             print(f"Reading from: {args.sheet}")
-            sheet = SheetManager(args.sheet)
             try:
                 channels = sheet.read_channels()
-            except ValueError:
-                pass
+            except ValueError as e:
+                print(f"Error reading sheet: {str(e)}")
+                if "Invalid action" in str(e) or "Target value is required" in str(e):
+                    print("\nPlease fix the errors in your spreadsheet and try again.")
+                    return
+                # Only continue with empty list for new/empty sheets
+                if "No values found" in str(e):
+                    print("No existing channels found in sheet, will create new")
+                    channels = []
+                else:
+                    raise  # Re-raise unexpected errors
         
         # Process any actions
         if channels:
+            # Validate channel data
+            invalid_channels = []
+            for channel in channels:
+                if not channel.get("channel_id"):
+                    invalid_channels.append(f"Missing channel ID for {channel.get('name', 'UNKNOWN')}")
+                if not channel.get("name"):
+                    invalid_channels.append(f"Missing name for channel {channel.get('channel_id', 'UNKNOWN')}")
+                if channel.get("action") == ChannelAction.ARCHIVE.value and channel.get("target_value"):
+                    target = channel["target_value"].lstrip('#')
+                    if not target.islower() or ' ' in target or '.' in target:
+                        invalid_channels.append(
+                            f"Invalid target channel format '{target}' for {channel['name']}. "
+                            "Must be lowercase with no spaces or periods."
+                        )
+            
+            if invalid_channels:
+                print("\nFound invalid channel data:")
+                for error in invalid_channels:
+                    print(f"- {error}")
+                print("\nPlease fix these issues and try again.")
+                return
+            
             actions = {}
             for channel in channels:
                 action = channel["action"]
@@ -97,10 +133,17 @@ async def main():
         current_ids = {ch["id"] for ch in current_channels}
         existing_ids = {ch["channel_id"] for ch in channels}
         
+        # Mark channels that are no longer active
+        for channel in channels:
+            if channel["channel_id"] not in current_ids:
+                channel["notes"] = "NO LONGER ACTIVE: " + channel.get("notes", "")
+                channel["action"] = ChannelAction.KEEP.value  # Clear any pending actions
+                channel["target_value"] = ""  # Clear any target values
+        
         # Add new channels
         for channel in current_channels:
             if channel["id"] not in existing_ids:
-                channels.append({
+                new_channel = {
                     "channel_id": channel["id"],
                     "name": channel["name"],
                     "is_private": str(channel["is_private"]).lower(),
@@ -109,7 +152,8 @@ async def main():
                     "action": ChannelAction.KEEP.value,
                     "target_value": "",
                     "notes": ""
-                })
+                }
+                channels.append(new_channel)
         
         # Write to spreadsheet
         if args.file:
@@ -120,8 +164,7 @@ async def main():
             finally:
                 f.close()
             print(f"\nUpdated: {args.file}")
-        else:
-            sheet = SheetManager(args.sheet)
+        elif sheet:  # Reuse existing sheet manager
             sheet.write_channels(channels)
             print(f"\nUpdated: {args.sheet}")
         

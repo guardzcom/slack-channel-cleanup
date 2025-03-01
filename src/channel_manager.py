@@ -13,7 +13,7 @@ from .channel_actions import ChannelActionHandler, ChannelAction
 
 async def get_all_channels(csv_writer=None) -> List[Dict]:
     """
-    Fetch all channels (public and private) from Slack workspace.
+    Fetch all active channels (public and private) from Slack workspace.
     Returns a list of channel dictionaries.
     
     Args:
@@ -33,7 +33,7 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
             # Get both public and private channels
             response = client.conversations_list(
                 types="public_channel,private_channel",
-                exclude_archived=True,
+                exclude_archived=True,  # Only get active channels
                 limit=200,  # Maximum allowed by Slack API
                 cursor=cursor
             )
@@ -81,7 +81,7 @@ async def get_channel_info(client, channel_id: str) -> Dict:
     except SlackApiError:
         return {}
 
-async def get_user_approval(client, channel: Dict, action: str, target_value: Optional[str] = None) -> bool:
+async def get_user_approval(client, channel: Dict, action: str, target_value: Optional[str] = None, current_channels: Optional[List[Dict]] = None) -> bool:
     """
     Get user approval for an action.
     
@@ -90,6 +90,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         channel: Channel dictionary
         action: Action to perform
         target_value: Target value for rename action or target channel for archive
+        current_channels: Optional list of current channels to validate against
     """
     action_desc = {
         ChannelAction.KEEP.value: "keep as is",
@@ -125,24 +126,33 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     # For archive actions with target channel, show target channel info
     if action == ChannelAction.ARCHIVE.value and target_value:
         try:
-            # Try to get target channel info
-            target_channels = client.conversations_list(
-                types="public_channel,private_channel",
-                exclude_archived=True
-            )["channels"]
-            target = next((ch for ch in target_channels if ch["name"] == target_value.lstrip('#')), None)
+            # Get target channel info by name from current_channels if available
+            target = None
+            target_name = target_value.lstrip('#')
+            
+            if current_channels:
+                target = next((ch for ch in current_channels if ch["name"] == target_name), None)
+            else:
+                # Fallback to API call if current_channels not provided
+                target_channels = client.conversations_list(
+                    types="public_channel,private_channel",
+                    exclude_archived=True
+                )["channels"]
+                target = next((ch for ch in target_channels if ch["name"] == target_name), None)
             
             if target:
+                # Now get detailed info using the correct channel ID
+                target_info = await get_channel_info(client, target["id"])
                 print("\nTarget Channel Information:")
-                print(f"Members: {target.get('num_members', 'unknown')}")
-                if target.get("purpose", {}).get("value"):
-                    print(f"Purpose: {target['purpose']['value']}")
-                if target.get("topic", {}).get("value"):
-                    print(f"Topic: {target['topic']['value']}")
+                print(f"Members: {target_info.get('num_members', 'unknown')}")
+                if target_info.get("purpose", {}).get("value"):
+                    print(f"Purpose: {target_info['purpose']['value']}")
+                if target_info.get("topic", {}).get("value"):
+                    print(f"Topic: {target_info['topic']['value']}")
                     
                 # Warn about redirecting to a smaller channel
                 source_members = int(channel.get("member_count", 0))
-                target_members = int(target.get("num_members", 0))
+                target_members = int(target_info.get("num_members", 0))
                 if target_members < source_members:
                     print("\n⚠️  Warning: Target channel has fewer members than source channel!")
             else:
@@ -154,25 +164,43 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     
     # For rename actions, validate the new name
     if action == ChannelAction.RENAME.value and target_value:
+        # Check length
+        if len(target_value) > 80:
+            print("\n❌ Error: Channel name is too long!")
+            print("Channel names must be 80 characters or less")
+            return False
+            
+        # Check format
         if not target_value.islower() or ' ' in target_value or '.' in target_value:
             print("\n❌ Error: Invalid channel name format!")
             print("Channel names must:")
             print("- Be lowercase")
             print("- Not contain spaces or periods")
-            print("- Only use letters, numbers, and hyphens")
+            print("- Only use letters, numbers, hyphens, and underscores")
             return False
             
-        # Check if name is already taken
-        try:
-            existing = client.conversations_list(
-                types="public_channel,private_channel",
-                exclude_archived=True
-            )["channels"]
-            if any(ch["name"] == target_value for ch in existing):
+        # Check valid characters
+        if not all(c.islower() or c.isdigit() or c in '-_' for c in target_value):
+            print("\n❌ Error: Channel name contains invalid characters!")
+            print("Only lowercase letters, numbers, hyphens, and underscores are allowed")
+            return False
+            
+        # Check if name is already taken (using current_channels if available)
+        if current_channels:
+            if any(ch["name"] == target_value for ch in current_channels):
                 print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
                 return False
-        except SlackApiError:
-            print("\n⚠️  Warning: Could not validate channel name availability")
+        else:
+            try:
+                existing = client.conversations_list(
+                    types="public_channel,private_channel",
+                    exclude_archived=True
+                )["channels"]
+                if any(ch["name"] == target_value for ch in existing):
+                    print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
+                    return False
+            except SlackApiError:
+                print("\n⚠️  Warning: Could not validate channel name availability")
     
     if channel.get("notes"):
         print(f"\nNotes: {channel['notes']}")
@@ -230,7 +258,10 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     try:
         # Sort channels by action type (renames first, then archives)
         def action_priority(channel):
-            action = channel["action"]
+            action = channel.get("action", "")
+            if not action:  # Handle missing action
+                return 3
+            action = action.lower()
             if action == ChannelAction.KEEP.value:
                 return 2
             elif action == ChannelAction.RENAME.value:
@@ -241,16 +272,31 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
         
         channels = sorted(channels, key=action_priority)
         
+        # Get current channels once for validation
+        current_channels = await get_all_channels()
+        
         for channel in channels:
-            action = channel["action"]
+            # Skip invalid channels
+            if not channel.get("channel_id") or not channel.get("name"):
+                print(f"⚠️  Skipping invalid channel: {channel}")
+                skipped += 1
+                continue
+                
+            action = channel.get("action", "").lower()
             
-            # Skip if action is "keep"
-            if action == ChannelAction.KEEP.value:
+            # Skip if action is "keep" or invalid
+            if not action or action == ChannelAction.KEEP.value:
+                continue
+                
+            # Validate action is supported
+            if action not in ChannelAction.values():
+                print(f"⚠️  Skipping unsupported action '{action}' for channel {channel['name']}")
+                skipped += 1
                 continue
             
             # Get user approval
             try:
-                approved = await get_user_approval(client, channel, action, channel["target_value"])
+                approved = await get_user_approval(client, channel, action, channel.get("target_value"), current_channels)
                 if not approved:
                     print("⏭️  Action skipped")
                     skipped += 1
@@ -258,6 +304,10 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
             except KeyboardInterrupt:
                 print("\n⛔ Process interrupted by user")
                 break
+            except Exception as e:
+                print(f"❌ Error getting approval for {channel['name']}: {str(e)}")
+                failed += 1
+                continue
             
             # Execute the approved action
             if dry_run:
@@ -266,34 +316,56 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
                 if channel.get("is_private"):
                     channel_name = f"🔒 {channel_name}"
                 
-                action_message = action_desc[action]
+                action_message = action_desc.get(action, action)
                 if action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
-                    action_message = f"{action_message} {channel['target_value']}"
+                    action_message = f"{action_message} {channel.get('target_value', '')}"
                     
                 print(f"✅ Would {action_message}: {channel_name}")
                 continue
-                
-            result = await handler.execute_action(
-                channel_id=channel["channel_id"],
-                channel_name=channel["name"],
-                action=action,
-                target_value=channel["target_value"]
-            )
             
-            if result.success:
-                successful += 1
-                print(f"✅ {result.message}")
-                last_action = (channel, action, channel["target_value"])
-                successful_channel_ids.append(channel["channel_id"])  # Add to successful list
-            else:
+            # Verify channel still exists and is in expected state before executing
+            try:
+                channel_info = await get_channel_info(client, channel["channel_id"])
+                if not channel_info:
+                    print(f"❌ Channel {channel['name']} no longer exists!")
+                    failed += 1
+                    continue
+                if channel_info.get("is_archived"):
+                    print(f"❌ Channel {channel['name']} is already archived!")
+                    failed += 1
+                    continue
+                if channel_info.get("name") != channel["name"]:
+                    print(f"❌ Channel has been renamed from {channel['name']} to {channel_info['name']}!")
+                    failed += 1
+                    continue
+                    
+                # Now execute the action
+                result = await handler.execute_action(
+                    channel_id=channel["channel_id"],
+                    channel_name=channel["name"],
+                    action=action,
+                    target_value=channel.get("target_value", "")
+                )
+                
+                if result.success:
+                    successful += 1
+                    print(f"✅ {result.message}")
+                    last_action = (channel, action, channel.get("target_value"))
+                    successful_channel_ids.append(channel["channel_id"])  # Add to successful list
+                else:
+                    failed += 1
+                    print(f"❌ {result.message}")
+            except Exception as e:
                 failed += 1
-                print(f"❌ {result.message}")
+                print(f"❌ Error processing {channel['name']}: {str(e)}")
             
             # Respect rate limits
             await asyncio.sleep(1)
     
     except KeyboardInterrupt:
         print("\n⛔ Process interrupted by user")
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {str(e)}")
     
     finally:
         print("\nExecution Summary:")
