@@ -90,15 +90,11 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         client: Slack client
         channel: Channel dictionary
         action: Action to perform
-        target_value: Target value for merge/rename actions
-    
-    Returns:
-        bool: True if approved, False if skipped
+        target_value: Target value for rename action or target channel for archive
     """
     action_desc = {
         ChannelAction.KEEP.value: "keep as is",
-        ChannelAction.ARCHIVE.value: "archive",
-        ChannelAction.MERGE.value: f"merge into #{target_value}",
+        ChannelAction.ARCHIVE.value: target_value and f"archive (with notice to join #{target_value})" or "archive",
         ChannelAction.RENAME.value: f"rename to '{target_value}'"
     }
     
@@ -127,8 +123,8 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     
     print(f"\nProposed Action: {desc}")
     
-    # For merge actions, show target channel info and validate
-    if action == ChannelAction.MERGE.value and target_value:
+    # For archive actions with target channel, show target channel info
+    if action == ChannelAction.ARCHIVE.value and target_value:
         try:
             # Try to get target channel info
             target_channels = client.conversations_list(
@@ -145,7 +141,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
                 if target.get("topic", {}).get("value"):
                     print(f"Topic: {target['topic']['value']}")
                     
-                # Warn about merging into a smaller channel
+                # Warn about redirecting to a smaller channel
                 source_members = int(channel.get("member_count", 0))
                 target_members = int(target.get("num_members", 0))
                 if target_members < source_members:
@@ -184,10 +180,10 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     print("-" * 80)
     
     # Extra warning for destructive actions
-    if action in [ChannelAction.ARCHIVE.value, ChannelAction.MERGE.value]:
+    if action == ChannelAction.ARCHIVE.value:
         print("\n⚠️  WARNING: This is a destructive action that cannot be easily undone!")
         print("The channel will be archived and members will need to be manually re-added if restored.")
-        if action == ChannelAction.MERGE.value:
+        if target_value:
             print("Members will need to manually join the target channel.")
             print(f"Consider posting an announcement in #{channel['name']} before proceeding.")
     
@@ -212,7 +208,6 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     action_desc = {
         ChannelAction.KEEP.value: "keep as is",
         ChannelAction.ARCHIVE.value: "archive",
-        ChannelAction.MERGE.value: "merge into",
         ChannelAction.RENAME.value: "rename to"
     }
     
@@ -223,26 +218,24 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     print("- Press 'n' to skip")
     print("- Press 'q' to quit the process")
     print("\nNotes:")
-    print("- Destructive actions (archive/merge) require additional confirmation")
-    print("- Actions are sorted to process renames before archives/merges")
+    print("- Destructive actions (archive) require additional confirmation")
+    print("- Actions are sorted to process renames before archives")
     print("- A backup of your CSV file will be created before processing")
     if dry_run:
         print("\n🔍 DRY RUN MODE - No changes will be made to channels")
     print("=" * 80)
     
     try:
-        # Sort channels by action type (renames first, then archives/merges)
+        # Sort channels by action type (renames first, then archives)
         def action_priority(channel):
             action = channel["action"]
             if action == ChannelAction.KEEP.value:
-                return 3
+                return 2
             elif action == ChannelAction.RENAME.value:
                 return 0
             elif action == ChannelAction.ARCHIVE.value:
                 return 1
-            elif action == ChannelAction.MERGE.value:
-                return 2
-            return 4
+            return 3
         
         channels = sorted(channels, key=action_priority)
         
@@ -272,7 +265,7 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
                     channel_name = f"🔒 {channel_name}"
                 
                 action_message = action_desc[action]
-                if action in [ChannelAction.MERGE.value, ChannelAction.RENAME.value]:
+                if action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
                     action_message = f"{action_message} {channel['target_value']}"
                     
                 print(f"✅ Would {action_message}: {channel_name}")
@@ -306,7 +299,7 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
         print(f"Skipped actions: {skipped}")
         print(f"Total channels processed: {successful + failed + skipped}")
         
-        if last_action and last_action[1] in [ChannelAction.ARCHIVE.value, ChannelAction.MERGE.value]:
+        if last_action and last_action[1] == ChannelAction.ARCHIVE.value:
             print("\nNote: To undo the last archive action, use the Slack UI:")
             print(f"1. Go to channel #{last_action[0]['name']}")
             print("2. Click the gear icon ⚙️")
@@ -373,7 +366,6 @@ async def main():
             print("2. Review the channels and set the 'action' column to one of:")
             print("   - keep: Keep the channel as is (default)")
             print("   - archive: Archive the channel")
-            print("   - merge: Merge into another channel (specify target in 'target_value')")
             print("   - rename: Rename the channel (specify new name in 'target_value')")
             print("3. Save the CSV and run the script with 'execute' mode")
             

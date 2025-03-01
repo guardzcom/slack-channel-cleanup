@@ -44,7 +44,7 @@ def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
         "member_count": channel["num_members"],
         "created_date": created,
         "action": ChannelAction.KEEP.value,  # Default action
-        "target_value": "",  # Empty for merge/rename target
+        "target_value": "",  # Empty for rename target or archive redirect
         "notes": ""  # For any additional notes/comments
     }
     writer.writerow(row)
@@ -99,8 +99,8 @@ def read_channels_from_csv(filename: str) -> List[Dict]:
                     f"Must be one of: {', '.join(ChannelAction.values())}"
                 )
             
-            # Validate target value for merge and rename actions
-            if action in [ChannelAction.MERGE.value, ChannelAction.RENAME.value] and not row["target_value"]:
+            # Validate target value for rename action
+            if action == ChannelAction.RENAME.value and not row["target_value"]:
                 raise ValueError(
                     f"Target value is required for {action} action on channel {row['name']}"
                 )

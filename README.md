@@ -1,6 +1,6 @@
 # Slack Channel Manager
 
-A Python script to manage Slack channels in bulk, supporting operations like renaming, archiving, and merging channels. Perfect for workspace cleanup and reorganization.
+A Python script to manage Slack channels in bulk, supporting operations like renaming and archiving channels. Perfect for workspace cleanup and reorganization.
 
 > 🤖 Built with [Cursor](https://cursor.sh/), the AI-first code editor, and its Claude-powered assistant.
 
@@ -13,7 +13,7 @@ This tool performs bulk operations that can permanently affect your Slack worksp
 Managing Slack channels at scale can be tedious and error-prone. This tool helps you:
 - Clean up inactive channels
 - Reorganize channel naming
-- Merge redundant channels
+- Consolidate redundant channels
 - Review changes before executing
 - Keep audit trail of all actions
 
@@ -21,7 +21,7 @@ Managing Slack channels at scale can be tedious and error-prone. This tool helps
 
 - 🔍 Export all channels (public and private) to CSV
 - 📝 Review and plan changes in your spreadsheet app
-- 🔄 Bulk actions: rename, archive, or merge channels
+- 🔄 Bulk actions: rename or archive channels (with optional redirect notices)
 - ✨ Interactive approval process with detailed channel info
 - 🛡️ Safe execution with dry-run mode and backups
 - 📊 Real-time progress and summary reporting
@@ -34,7 +34,9 @@ Managing Slack channels at scale can be tedious and error-prone. This tool helps
   - `groups:read` - For listing private channels
   - `channels:write` - For managing public channels
   - `groups:write` - For managing private channels
-  - `chat:write` - For posting messages (used for merge notifications)
+  - `chat:write` - For posting redirect notices (optional)
+
+Note: Admin privileges are recommended for full workspace management capabilities.
 
 To get a Slack token:
 1. Go to [api.slack.com/apps](https://api.slack.com/apps)
@@ -61,14 +63,13 @@ This will create a CSV file with columns:
 ```csv
 channel_id,name,is_private,member_count,created_date,action,target_value,notes
 C12345678,general,false,50,2022-01-01,keep,,
-C87654321,team-dev,true,10,2023-03-15,merge,team-engineering,Moving to unified team channel
+C87654321,team-dev,true,10,2023-03-15,archive,team-engineering,Moving to unified team channel
 C98765432,old-project,false,5,2022-06-20,archive,,Inactive since 2023
 ```
 
 2. Edit the CSV file and set actions:
 - `keep` - No changes (default)
-- `archive` - Archive the channel
-- `merge` - Merge into another channel (set target in `target_value`)
+- `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice before archiving
 - `rename` - Rename channel (set new name in `target_value`)
 
 3. Test your changes (dry run):
@@ -110,10 +111,13 @@ Options:
 - Cannot archive:
   - The general/default channel
   - Required channels
-  - Channels where you're not a member
+  - Channels where you're not a member (unless you're an admin)
+- Cannot post redirect notices:
+  - To non-existent channels
+  - To archived channels
 - Cannot rename:
   - Archived channels
-  - Channels without proper permissions
+  - Channels without proper permissions (unless you're an admin)
   - To names that already exist
 - Channel names must be:
   - Lowercase

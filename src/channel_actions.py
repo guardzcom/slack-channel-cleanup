@@ -7,7 +7,6 @@ class ChannelAction(str, Enum):
     """Supported actions for channel management."""
     KEEP = "keep"
     ARCHIVE = "archive"
-    MERGE = "merge"
     RENAME = "rename"
     
     @classmethod
@@ -38,20 +37,14 @@ class ChannelActionHandler:
             channel_id: The Slack channel ID
             channel_name: The current channel name
             action: The action to perform (from ChannelAction)
-            target_value: Additional value needed for merge (target channel) or rename (new name)
+            target_value: Additional value needed for archive (target channel for redirect) or rename (new name)
         """
         try:
             if action == ChannelAction.KEEP:
                 return ChannelActionResult(True, f"Channel {channel_name} kept as is")
                 
             elif action == ChannelAction.ARCHIVE:
-                response = await self.archive_channel(channel_id, channel_name)
-                return response
-                
-            elif action == ChannelAction.MERGE:
-                if not target_value:
-                    return ChannelActionResult(False, f"Target channel not specified for merging {channel_name}")
-                response = await self.merge_channel(channel_id, channel_name, target_value)
+                response = await self.archive_channel(channel_id, channel_name, target_value)
                 return response
                 
             elif action == ChannelAction.RENAME:
@@ -69,8 +62,15 @@ class ChannelActionHandler:
         except Exception as e:
             return ChannelActionResult(False, f"Unexpected error for {channel_name}: {str(e)}")
     
-    async def archive_channel(self, channel_id: str, channel_name: str) -> ChannelActionResult:
-        """Archive a channel."""
+    async def archive_channel(self, channel_id: str, channel_name: str, target_channel: Optional[str] = None) -> ChannelActionResult:
+        """
+        Archive a channel. If target_channel is provided, post a redirect notice before archiving.
+        
+        Args:
+            channel_id: The channel ID to archive
+            channel_name: The name of the channel to archive
+            target_channel: Optional target channel name for redirect notice
+        """
         try:
             # First check if it's the general channel
             channel_info = self.client.conversations_info(channel=channel_id)["channel"]
@@ -79,14 +79,63 @@ class ChannelActionHandler:
                     False,
                     f"Cannot archive #{channel_name}: This is the workspace's general channel"
                 )
+
+            # If target channel specified, handle redirect notice
+            if target_channel:
+                target_channel = target_channel.lstrip('#')
+                try:
+                    # Verify target channel exists
+                    channels = self.client.conversations_list(
+                        types="public_channel,private_channel",
+                        limit=200
+                    )["channels"]
+                    target = next((ch for ch in channels if ch["name"] == target_channel), None)
+                    if not target:
+                        return ChannelActionResult(
+                            False,
+                            f"Cannot archive #{channel_name}: Target channel #{target_channel} does not exist"
+                        )
+                    
+                    # Get the target channel ID for proper mention
+                    target_id = target["id"]
+                    
+                    # Try to post redirect notice
+                    message = (
+                        f"🔄 *Channel Redirect Notice*\n"
+                        f"This channel is being archived. Please join <#{target_id}> to continue the discussion."
+                    )
+                    
+                    try:
+                        # Try to join the channel first if we're not already a member
+                        try:
+                            self.client.conversations_join(channel=channel_id)
+                        except SlackApiError:
+                            pass  # Ignore if we can't join or are already a member
+                        
+                        # Try to post the message
+                        self.client.chat_postMessage(
+                            channel=channel_id,
+                            text=message,
+                            mrkdwn=True
+                        )
+                    except SlackApiError:
+                        # Continue with archive even if we couldn't post the message
+                        pass
+                    
+                except SlackApiError:
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot archive #{channel_name}: Failed to verify target channel"
+                    )
                 
+            # Archive the channel
             response = self.client.conversations_archive(channel=channel_id)
             
             if response["ok"]:
-                return ChannelActionResult(
-                    True,
-                    f"Successfully archived #{channel_name}"
-                )
+                message = f"Successfully archived #{channel_name}"
+                if target_channel:
+                    message += f" (with redirect to #{target_channel})"
+                return ChannelActionResult(True, message)
                 
         except SlackApiError as e:
             error = e.response["error"]
@@ -104,75 +153,6 @@ class ChannelActionHandler:
             return ChannelActionResult(
                 False, 
                 error_messages.get(error, f"Failed to archive #{channel_name}: {error}")
-            )
-    
-    async def merge_channel(
-        self,
-        channel_id: str,
-        channel_name: str,
-        target_channel: str
-    ) -> ChannelActionResult:
-        """Merge a channel by posting a message and archiving it."""
-        # Remove '#' prefix if present in target channel
-        target_channel = target_channel.lstrip('#')
-        
-        try:
-            # First verify the target channel exists
-            try:
-                channels = self.client.conversations_list(
-                    types="public_channel,private_channel",
-                    limit=200
-                )["channels"]
-                target = next((ch for ch in channels if ch["name"] == target_channel), None)
-                if not target:
-                    return ChannelActionResult(
-                        False,
-                        f"Cannot merge #{channel_name}: Target channel #{target_channel} does not exist"
-                    )
-                    
-                # Get the target channel ID for proper mention
-                target_id = target["id"]
-            except SlackApiError:
-                # If we can't verify the target channel, we'll still try to post the message
-                target_id = None
-            
-            # Post message about the merge
-            message = (
-                f"🔄 *Channel Merge Notice*\n"
-                f"This channel is being merged into <#{target_id or target_channel}>.\n"
-                f"Please join that channel to continue the discussion."
-            )
-            
-            try:
-                self.client.chat_postMessage(
-                    channel=channel_id,
-                    text=message,
-                    mrkdwn=True  # Enable markdown formatting for the channel mention
-                )
-            except SlackApiError as e:
-                error = e.response["error"]
-                error_messages = {
-                    "channel_not_found": f"Cannot merge #{channel_name}: Channel not found",
-                    "not_in_channel": f"Cannot merge #{channel_name}: Bot must be invited to the channel first",
-                    "is_archived": f"Cannot merge #{channel_name}: Channel is already archived",
-                    "restricted_action": f"Cannot merge #{channel_name}: Workspace settings prevent posting messages",
-                    "missing_scope": (
-                        f"Cannot merge #{channel_name}: Missing required permissions. "
-                        "Need chat:write scope for posting messages."
-                    )
-                }
-                return ChannelActionResult(
-                    False,
-                    error_messages.get(error, f"Failed to post merge message in #{channel_name}: {error}")
-                )
-            
-            # Archive the channel
-            return await self.archive_channel(channel_id, channel_name)
-            
-        except Exception as e:
-            return ChannelActionResult(
-                False,
-                f"Unexpected error while merging #{channel_name}: {str(e)}"
             )
     
     async def rename_channel(
