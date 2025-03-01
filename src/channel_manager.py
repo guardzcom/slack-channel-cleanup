@@ -11,6 +11,18 @@ from .channel_csv import (
 from .sheet_manager import SheetManager
 from .channel_actions import ChannelActionHandler, ChannelAction
 
+async def fetch_channel_history(client, channel: Dict) -> None:
+    """Fetch history for a single channel."""
+    try:
+        history = client.conversations_history(
+            channel=channel["id"],
+            limit=1  # Just get the most recent message
+        )
+        if history["messages"]:
+            channel["latest"] = history["messages"][0]
+    except SlackApiError:
+        print(f"    ⚠️  Could not fetch history for #{channel['name']}")
+
 async def get_all_channels(csv_writer=None) -> List[Dict]:
     """
     Fetch all active channels (public and private) from Slack workspace.
@@ -18,8 +30,6 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
     
     Args:
         csv_writer: Optional CSV writer to write channels as they're fetched
-    
-    Note: Requires both channels:read and groups:read scopes.
     """
     client = get_slack_client()
     channels = []
@@ -30,60 +40,48 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
     while True:
         try:
             print(f"Fetching page {page}...")
-            # Get both public and private channels
             response = client.conversations_list(
                 types="public_channel,private_channel",
-                exclude_archived=True,  # Only get active channels
-                limit=200,  # Maximum allowed by Slack API
+                exclude_archived=True,
+                limit=200,
                 cursor=cursor,
-                include_num_members=True  # Get member count
+                include_num_members=True
             )
             
             if not response["ok"]:
                 raise SlackApiError("Failed to fetch channels", response)
             
-            # Get latest message for each channel
-            for channel in response["channels"]:
-                try:
-                    history = client.conversations_history(
-                        channel=channel["id"],
-                        limit=1  # Just get the most recent message
-                    )
-                    if history["messages"]:
-                        channel["latest"] = history["messages"][0]
-                except SlackApiError:
-                    pass  # Skip if we can't get history
-                
-                # Respect rate limits
-                await asyncio.sleep(0.5)  # Add small delay between history calls
-                
             new_channels = response["channels"]
+            print(f"\nFetching last activity for {len(new_channels)} channels...")
+            
+            # Create tasks for concurrent history fetching
+            tasks = []
+            for i, channel in enumerate(new_channels, 1):
+                print(f"  Queuing #{channel['name']}...")
+                tasks.append(fetch_channel_history(client, channel))
+                if len(tasks) >= 10:  # Process in batches of 10
+                    await asyncio.gather(*tasks)
+                    tasks = []
+                    await asyncio.sleep(0.2)  # Small delay between batches
+            
+            # Process any remaining tasks
+            if tasks:
+                await asyncio.gather(*tasks)
+            
             channels.extend(new_channels)
             
-            # Write new channels to CSV if writer provided
             if csv_writer:
                 for channel in new_channels:
                     write_channel_to_csv(csv_writer, channel)
             
             print(f"Found {len(new_channels)} channels on page {page} (Total: {len(channels)})")
             
-            # Handle pagination
             cursor = response.get("response_metadata", {}).get("next_cursor")
             if not cursor:
                 break
-                
-            # Respect rate limits (Tier 2: 20+ per minute)
-            print("Waiting for rate limit...")
-            await asyncio.sleep(1)
-            page += 1
             
-            # Fetch additional info for each channel
-            for channel in response["channels"]:
-                try:
-                    info = client.conversations_info(channel=channel["id"])["channel"]
-                    channel.update(info)  # Update with additional info including last_read
-                except SlackApiError:
-                    pass  # Skip if we can't get additional info
+            page += 1
+            await asyncio.sleep(0.2)  # Small delay between pages
             
         except SlackApiError as e:
             error_code = e.response.get("error", "unknown_error")
