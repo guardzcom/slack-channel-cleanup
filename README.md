@@ -111,14 +111,19 @@ python slack_channel_curator.py -f channels.csv --dry-run
 ```
 
 The spreadsheet has the following columns:
+
+Required columns:
 - channel_id: Slack's internal channel ID
 - name: Channel name
+- action: What action to take (keep, archive, rename)
+- target_value: Target for rename or archive redirect
+
+Optional columns:
 - is_private: Whether the channel is private
+- is_shared: Whether the channel is shared via Slack Connect
 - member_count: Number of members
 - created_date: When the channel was created
 - last_activity: Date of the most recent message (YYYY-MM-DD)
-- action: What action to take (keep, archive, rename)
-- target_value: Target for rename or archive redirect
 - notes: Optional notes about the change
 
 To make changes:
@@ -159,6 +164,7 @@ Note: You must specify either --file OR --sheet, but not both.
 - Cannot archive:
   - The general/default channel
   - Required channels
+  - Slack Connect (shared) channels
   - Channels where you're not a member (unless you're an admin)
 - Redirect notices:
   - Will attempt to post when archiving with a target channel

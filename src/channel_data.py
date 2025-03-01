@@ -5,10 +5,19 @@ from .channel_actions import ChannelAction
 import os
 
 # Standard data structure for channel information
+REQUIRED_HEADERS = [
+    "channel_id",
+    "name",
+    "action",
+    "target_value"
+]
+
+# All supported headers
 CHANNEL_HEADERS = [
     "channel_id",
     "name",
     "is_private",
+    "is_shared",
     "member_count",
     "created_date",
     "last_activity",
@@ -61,17 +70,29 @@ def create_channel_dict(channel: Dict) -> Dict:
         except (ValueError, TypeError, AttributeError):
             pass  # Invalid timestamp or no latest message, leave empty
             
-    return {
+    # Start with required fields
+    result = {
         "channel_id": channel["id"],
         "name": channel["name"],
-        "is_private": str(channel["is_private"]).lower(),
-        "member_count": str(channel["num_members"]),
-        "created_date": datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d"),
-        "last_activity": last_activity,
         "action": ChannelAction.KEEP.value,
-        "target_value": "",
-        "notes": ""
+        "target_value": ""
     }
+    
+    # Add optional fields if available
+    if "is_private" in channel:
+        result["is_private"] = str(channel["is_private"]).lower()
+    if "is_shared" in channel:
+        result["is_shared"] = str(channel.get("is_shared", False)).lower()
+    if "num_members" in channel:
+        result["member_count"] = str(channel["num_members"])
+    if "created" in channel:
+        result["created_date"] = datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d")
+    if "last_activity" in CHANNEL_HEADERS:  # Only add if supported
+        result["last_activity"] = last_activity
+    if "notes" in CHANNEL_HEADERS:
+        result["notes"] = ""
+        
+    return result
 
 def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
     """Write a single channel to CSV file."""
@@ -99,6 +120,13 @@ def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
             f"Must be one of: {', '.join(ChannelAction.values())}"
         )
     
+    # Prevent archiving shared channels
+    if action == ChannelAction.ARCHIVE.value and channel.get('is_shared', '').lower() == 'true':
+        raise ValueError(
+            f"Cannot archive shared channel {channel.get('name')}. "
+            "Slack Connect channels must be disconnected by workspace admins first."
+        )
+    
     # Validate target value is empty for keep action
     if action == ChannelAction.KEEP.value and channel.get('target_value'):
         raise ValueError(
@@ -113,7 +141,7 @@ def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
 
 def validate_headers(headers: List[str]) -> None:
     """Validate that all required headers are present in the data structure."""
-    missing = set(CHANNEL_HEADERS) - set(headers)
+    missing = set(REQUIRED_HEADERS) - set(headers)
     if missing:
         raise ValueError(f"Missing required headers: {', '.join(missing)}")
 
