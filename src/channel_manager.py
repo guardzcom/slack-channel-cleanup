@@ -343,8 +343,13 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         if response in ['y', 'n']:
             return response == 'y'
 
-async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -> List[str]:
+async def execute_channel_actions(channels: List[Dict], dry_run: bool = False, batch_size: int = 10) -> List[str]:
     """Process pending actions for the specified channels.
+    
+    Args:
+        channels: List of channels to process
+        dry_run: Whether to simulate execution without making changes
+        batch_size: Number of channels to confirm at once (0 for individual confirmation)
     
     Returns:
         List of channel IDs that were successfully processed
@@ -367,10 +372,19 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     
     print("\nExecuting channel actions:")
     print("=" * 80)
-    print("For each action, you can:")
-    print("- Press 'y' to approve")
-    print("- Press 'n' to skip")
-    print("- Press 'q' to quit the process")
+    if batch_size > 0:
+        print(f"Channels will be processed in batches of {batch_size}")
+        print("For each batch, you can:")
+        print("- Press 'y' to approve all")
+        print("- Press 'n' to skip all")
+        print("- Press 'i' to review individually")
+        print("- Press 'q' to quit the process")
+    else:
+        print("For each action, you can:")
+        print("- Press 'y' to approve")
+        print("- Press 'n' to skip")
+        print("- Press 'q' to quit the process")
+    
     print("\nNotes:")
     print("- Destructive actions (archive) require additional confirmation")
     print("- Actions are sorted to process renames before archives")
@@ -381,10 +395,9 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     try:
         # Sort channels by action type (renames first, then archives)
         def action_priority(channel):
-            action = channel.get("action", "")
+            action = channel.get("action", "").lower()
             if not action:  # Handle missing action
                 return 3
-            action = action.lower()
             if action == ChannelAction.KEEP.value:
                 return 2
             elif action == ChannelAction.RENAME.value:
@@ -398,7 +411,11 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
         # Get current channels once for validation
         current_channels = await get_all_channels()
         
-        for channel in channels:
+        # Process channels in batches if batch_size > 0
+        batch_channels = []
+        batch_count = 0
+        
+        for i, channel in enumerate(channels):
             # Skip invalid channels
             if not channel.get("channel_id") or not channel.get("name"):
                 print(f"⚠️  Skipping invalid channel: {channel}")
@@ -417,103 +434,111 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
                 skipped += 1
                 continue
             
-            # Get user approval
-            try:
-                approved = await get_user_approval(client, channel, action, channel.get("target_value"), current_channels)
-                if not approved:
-                    print("⏭️  Action skipped")
-                    skipped += 1
-                    continue
-            except KeyboardInterrupt:
-                print("\n⛔ Process interrupted by user")
-                break
-            except Exception as e:
-                print(f"❌ Error getting approval for {channel['name']}: {str(e)}")
-                failed += 1
-                continue
-            
-            # Execute the approved action
-            if dry_run:
-                successful += 1
-                channel_name = f"#{channel['name']}"
-                if channel.get("is_private"):
-                    channel_name = f"🔒 {channel_name}"
+            # For batch processing
+            if batch_size > 0:
+                batch_channels.append(channel)
+                batch_count += 1
                 
-                action_message = action_desc.get(action, action)
-                if action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
-                    action_message = f"{action_message} {channel.get('target_value', '')}"
-                    
-                print(f"✅ Would {action_message}: {channel_name}")
-                continue
-            
-            # Verify channel still exists and is in expected state before executing
-            try:
-                channel_info = await get_channel_info(client, channel["channel_id"])
-                if not channel_info:
-                    print(f"❌ Channel {channel['name']} no longer exists!")
-                    while True:
-                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
-                        if response == 'q':
-                            raise KeyboardInterrupt("User requested to quit")
-                        if response == 'n':
-                            skipped += 1
-                            break
-                    continue
-                if channel_info.get("is_archived"):
-                    print(f"❌ Channel {channel['name']} is already archived!")
-                    while True:
-                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
-                        if response == 'q':
-                            raise KeyboardInterrupt("User requested to quit")
-                        if response == 'n':
-                            skipped += 1
-                            break
-                    continue
-                if channel_info.get("name") != channel["name"]:
-                    print(f"❌ Channel has been renamed from {channel['name']} to {channel_info['name']}!")
-                    while True:
-                        response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
-                        if response == 'q':
-                            raise KeyboardInterrupt("User requested to quit")
-                        if response == 'n':
-                            skipped += 1
-                            break
-                    continue
-                    
-                # Now execute the action
-                result = await handler.execute_action(
-                    channel_id=channel["channel_id"],
-                    channel_name=channel["name"],
-                    action=action,
-                    target_value=channel.get("target_value", "")
-                )
-                
-                if result.success:
-                    successful += 1
-                    print(f"✅ {result.message}")
-                    
-                    # Update channel name in our data after successful rename
-                    if action == ChannelAction.RENAME.value:
-                        channel["name"] = channel.get("target_value")
-                    
-                    last_action = (channel, action, channel.get("target_value"))
-                    successful_channel_ids.append(channel["channel_id"])  # Add to successful list
-                else:
-                    failed += 1
-                    print(f"❌ {result.message}")
-            except Exception as e:
-                print(f"❌ Error processing {channel['name']}: {str(e)}")
-                while True:
-                    response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
-                    if response == 'q':
-                        raise KeyboardInterrupt("User requested to quit")
-                    if response == 'n':
+                # Process batch when we reach batch_size or at the end
+                if batch_count >= batch_size or i == len(channels) - 1:
+                    if batch_channels:
+                        # Display batch summary
+                        print("\n" + "=" * 80)
+                        print(f"Batch of {len(batch_channels)} channels:")
+                        for idx, ch in enumerate(batch_channels, 1):
+                            ch_action = ch.get("action", "").lower()
+                            ch_name = f"#{ch['name']}"
+                            if ch.get("is_private"):
+                                ch_name = f"🔒 {ch_name}"
+                            
+                            action_message = action_desc.get(ch_action, ch_action)
+                            if ch_action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
+                                action_message = f"{action_message} {ch.get('target_value', '')}"
+                                
+                            print(f"{idx}. {action_message}: {ch_name}")
+                        
+                        # Get batch approval
+                        while True:
+                            response = input("\nPress 'y' to approve all, 'n' to skip all, 'i' for individual review, or 'q' to quit: ").lower()
+                            if response == 'q':
+                                raise KeyboardInterrupt("User requested to quit")
+                            if response in ['y', 'n', 'i']:
+                                break
+                        
+                        if response == 'y':
+                            # Process all channels in batch
+                            for ch in batch_channels:
+                                result = await process_single_channel(ch, handler, client, current_channels, dry_run)
+                                if result == "success":
+                                    successful += 1
+                                    successful_channel_ids.append(ch["channel_id"])
+                                    last_action = (ch, ch.get("action"), ch.get("target_value"))
+                                elif result == "failed":
+                                    failed += 1
+                                elif result == "skipped":
+                                    skipped += 1
+                        elif response == 'n':
+                            # Skip all channels in batch
+                            skipped += len(batch_channels)
+                            print(f"⏭️  Skipped {len(batch_channels)} actions")
+                        elif response == 'i':
+                            # Process channels individually
+                            for ch in batch_channels:
+                                try:
+                                    approved = await get_user_approval(client, ch, ch.get("action"), ch.get("target_value"), current_channels)
+                                    if not approved:
+                                        print("⏭️  Action skipped")
+                                        skipped += 1
+                                        continue
+                                except KeyboardInterrupt:
+                                    print("\n⛔ Process interrupted by user")
+                                    raise
+                                except Exception as e:
+                                    print(f"❌ Error getting approval for {ch['name']}: {str(e)}")
+                                    failed += 1
+                                    continue
+                                
+                                result = await process_single_channel(ch, handler, client, current_channels, dry_run)
+                                if result == "success":
+                                    successful += 1
+                                    successful_channel_ids.append(ch["channel_id"])
+                                    last_action = (ch, ch.get("action"), ch.get("target_value"))
+                                elif result == "failed":
+                                    failed += 1
+                                elif result == "skipped":
+                                    skipped += 1
+                        
+                        # Reset batch
+                        batch_channels = []
+                        batch_count = 0
+                        
+                        # Small delay between batches
+                        await asyncio.sleep(0.5)
+            else:
+                # Individual processing (original behavior)
+                try:
+                    approved = await get_user_approval(client, channel, action, channel.get("target_value"), current_channels)
+                    if not approved:
+                        print("⏭️  Action skipped")
                         skipped += 1
-                        break
-                continue
-            
-            # Respect rate limits
-            await asyncio.sleep(1)
+                        continue
+                except KeyboardInterrupt:
+                    print("\n⛔ Process interrupted by user")
+                    break
+                except Exception as e:
+                    print(f"❌ Error getting approval for {channel['name']}: {str(e)}")
+                    failed += 1
+                    continue
+                
+                result = await process_single_channel(channel, handler, client, current_channels, dry_run)
+                if result == "success":
+                    successful += 1
+                    successful_channel_ids.append(channel["channel_id"])
+                    last_action = (channel, action, channel.get("target_value"))
+                elif result == "failed":
+                    failed += 1
+                elif result == "skipped":
+                    skipped += 1
     
     except KeyboardInterrupt:
         print("\n⛔ Process interrupted by user")
@@ -552,4 +577,61 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
             print("3. Select 'Additional options'")
             print("4. Choose 'Unarchive channel'")
         
-        return successful_channel_ids  # Return the list of successful channel IDs 
+        return successful_channel_ids  # Return the list of successful channel IDs
+
+# Helper function to process a single channel
+async def process_single_channel(channel, handler, client, current_channels, dry_run):
+    """Process a single channel and return the result status."""
+    channel_name = f"#{channel['name']}"
+    if channel.get("is_private"):
+        channel_name = f"🔒 {channel_name}"
+    
+    action = channel.get("action", "").lower()
+    action_message = {
+        ChannelAction.KEEP.value: "keep as is",
+        ChannelAction.ARCHIVE.value: "archive",
+        ChannelAction.RENAME.value: "rename to"
+    }.get(action, action)
+    
+    if action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
+        action_message = f"{action_message} {channel.get('target_value', '')}"
+    
+    if dry_run:
+        print(f"✅ Would {action_message}: {channel_name}")
+        return "success"
+    
+    # Verify channel still exists and is in expected state before executing
+    try:
+        channel_info = await get_channel_info(client, channel["channel_id"])
+        if not channel_info:
+            print(f"❌ Channel {channel['name']} no longer exists!")
+            return "skipped"
+        if channel_info.get("is_archived"):
+            print(f"❌ Channel {channel['name']} is already archived!")
+            return "skipped"
+        if channel_info.get("name") != channel["name"]:
+            print(f"❌ Channel has been renamed from {channel['name']} to {channel_info['name']}!")
+            return "skipped"
+            
+        # Now execute the action
+        result = await handler.execute_action(
+            channel_id=channel["channel_id"],
+            channel_name=channel["name"],
+            action=action,
+            target_value=channel.get("target_value", "")
+        )
+        
+        if result.success:
+            print(f"✅ {result.message}")
+            
+            # Update channel name in our data after successful rename
+            if action == ChannelAction.RENAME.value:
+                channel["name"] = channel.get("target_value")
+            
+            return "success"
+        else:
+            print(f"❌ {result.message}")
+            return "failed"
+    except Exception as e:
+        print(f"❌ Error processing {channel['name']}: {str(e)}")
+        return "skipped" 

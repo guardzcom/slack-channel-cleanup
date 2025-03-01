@@ -108,6 +108,12 @@ python slack_channel_curator.py --sheet "YOUR-SHEET-URL"
 
 # Test changes with dry run mode
 python slack_channel_curator.py -f channels.csv --dry-run
+
+# Process channels in batches of 5 instead of the default 10
+python slack_channel_curator.py -f channels.csv --batch 5
+
+# Process each channel individually (no batch confirmation)
+python slack_channel_curator.py -f channels.csv --batch 0
 ```
 
 The spreadsheet has the following columns:
@@ -148,13 +154,14 @@ Options:
   -f, --file FILE      Path to CSV file (cannot be used with --sheet)
   --sheet URL          Google Sheets URL (cannot be used with --file)
   -d, --dry-run        Simulate execution without making changes
+  -b, --batch SIZE     Number of channels to confirm at once (default: 10, 0 for individual confirmation)
 
 Note: You must specify either --file OR --sheet, but not both.
 ```
 
 ## Safety Features
 
-- ✅ Interactive approval for each action
+- ✅ Interactive approval for each action (individual or batch)
 - ⚠️ Extra confirmation for destructive actions
 - 🔍 Dry run mode to preview changes
 - 🔒 Permission and name validation

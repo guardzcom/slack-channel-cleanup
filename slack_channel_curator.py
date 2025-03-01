@@ -35,6 +35,13 @@ async def main():
         action="store_true",
         help="Show what would be done without making any changes"
     )
+    parser.add_argument(
+        "--batch",
+        "-b",
+        type=int,
+        default=10,
+        help="Number of channels to confirm at once (0 for individual confirmation, default: 10)"
+    )
     
     args = parser.parse_args()
     
@@ -112,7 +119,8 @@ async def main():
                 channels_to_process = [ch for ch in channels if ch["action"] != ChannelAction.KEEP.value]
                 successful_channel_ids = await execute_channel_actions(
                     channels_to_process,
-                    dry_run=args.dry_run
+                    dry_run=args.dry_run,
+                    batch_size=args.batch
                 )
                 
                 # Clear successful actions
