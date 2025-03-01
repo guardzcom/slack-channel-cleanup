@@ -291,6 +291,8 @@ class ChannelActionHandler:
     ) -> ChannelActionResult:
         """Update a channel's description (purpose)."""
         was_member = True  # Track if we were originally a member
+        max_retries = 3
+        retry_count = 0
         
         try:
             # Check if channel exists and is not archived
@@ -303,6 +305,9 @@ class ChannelActionHandler:
                         False,
                         f"Cannot update description for #{channel_name}: Channel is archived"
                     )
+                
+                # Check if we're a member directly from the API response
+                was_member = channel_info.get("is_member", False)
             except SlackApiError as e:
                 if e.response["error"] == "channel_not_found":
                     return ChannelActionResult(
@@ -311,64 +316,113 @@ class ChannelActionHandler:
                     )
                 raise
             
-            # Try to join the channel if needed
-            try:
-                # First check if we're already a member
-                try:
-                    self.client.conversations_info(channel=channel_id)
-                    # Try to post a message to check if we're a member
-                    try:
-                        # This will fail with not_in_channel if we're not a member
-                        self.client.conversations_mark(channel=channel_id, ts="0")
-                    except SlackApiError as e:
-                        if e.response["error"] == "not_in_channel":
-                            was_member = False
-                            # Join the channel
-                            print(f"Joining channel #{channel_name} to update description...")
-                            self.client.conversations_join(channel=channel_id)
-                except SlackApiError:
-                    # If we can't check, assume we need to join
-                    was_member = False
-                    self.client.conversations_join(channel=channel_id)
-            except SlackApiError as e:
-                if e.response["error"] in ["method_not_supported_for_channel_type", "channel_not_found"]:
-                    # Can't join DMs or private channels we're not invited to
-                    return ChannelActionResult(
-                        False,
-                        f"Cannot update description for #{channel_name}: Not a member and unable to join"
-                    )
-                # For other errors, continue and try to update anyway
-            
-            # Update the channel purpose
-            response = self.client.conversations_setPurpose(
-                channel=channel_id,
-                purpose=new_description
-            )
-            
-            # Leave the channel if we weren't originally a member
+            # Try to join the channel if we're not a member
             if not was_member:
                 try:
-                    print(f"Leaving channel #{channel_name} after updating description...")
-                    self.client.conversations_leave(channel=channel_id)
-                except SlackApiError:
-                    # If we can't leave, just continue
-                    pass
+                    print(f"Joining channel #{channel_name} to update description...")
+                    join_response = self.client.conversations_join(channel=channel_id)
+                    if not join_response.get("ok", False):
+                        return ChannelActionResult(
+                            False,
+                            f"Cannot update description for #{channel_name}: Failed to join channel"
+                        )
+                except SlackApiError as e:
+                    error = e.response["error"]
+                    if error in ["method_not_supported_for_channel_type", "channel_not_found", "missing_scope"]:
+                        return ChannelActionResult(
+                            False,
+                            f"Cannot update description for #{channel_name}: Not a member and unable to join ({error})"
+                        )
+                    # For other errors, log and continue
+                    print(f"Warning: Error joining #{channel_name}: {error}")
             
-            if response["ok"]:
+            # Update the channel purpose with retry logic for rate limits
+            while retry_count < max_retries:
+                try:
+                    response = self.client.conversations_setPurpose(
+                        channel=channel_id,
+                        purpose=new_description
+                    )
+                    
+                    # Leave the channel if we weren't originally a member
+                    if not was_member:
+                        try:
+                            print(f"Leaving channel #{channel_name} after updating description...")
+                            self.client.conversations_leave(channel=channel_id)
+                        except SlackApiError as leave_error:
+                            # If we can't leave, just log and continue
+                            print(f"Warning: Could not leave channel #{channel_name}: {leave_error.response.get('error', 'unknown error')}")
+                    
+                    if response["ok"]:
+                        return ChannelActionResult(
+                            True,
+                            f"Successfully updated description for #{channel_name}"
+                        )
+                    
+                except SlackApiError as e:
+                    error = e.response["error"]
+                    
+                    # Handle rate limiting
+                    if error == "ratelimited":
+                        retry_count += 1
+                        retry_after = int(e.response.get("headers", {}).get("Retry-After", 5))
+                        print(f"Rate limited when updating #{channel_name}, waiting {retry_after}s (retry {retry_count}/{max_retries})")
+                        
+                        # Wait before retrying
+                        import asyncio
+                        await asyncio.sleep(retry_after)
+                        continue
+                    
+                    # Handle other errors
+                    error_messages = {
+                        "not_in_channel": f"Cannot update description for #{channel_name}: You must be a member of the channel",
+                        "is_archived": f"Cannot update description for #{channel_name}: Channel is archived",
+                        "missing_scope": f"Cannot update description for #{channel_name}: Missing required permissions",
+                        "not_authorized": f"Cannot update description for #{channel_name}: You don't have permission to update the description"
+                    }
+                    
+                    # Leave the channel if we joined but couldn't update
+                    if not was_member:
+                        try:
+                            print(f"Leaving channel #{channel_name} after failed update attempt...")
+                            self.client.conversations_leave(channel=channel_id)
+                        except SlackApiError:
+                            pass
+                    
+                    return ChannelActionResult(
+                        False, 
+                        error_messages.get(error, f"Failed to update description for #{channel_name}: {error}")
+                    )
+                
+                # If we got here, we succeeded
+                break
+            
+            # If we've exhausted retries
+            if retry_count >= max_retries:
+                # Leave the channel if we joined but couldn't update due to rate limits
+                if not was_member:
+                    try:
+                        print(f"Leaving channel #{channel_name} after exhausting retries...")
+                        self.client.conversations_leave(channel=channel_id)
+                    except SlackApiError:
+                        pass
+                
                 return ChannelActionResult(
-                    True,
-                    f"Successfully updated description for #{channel_name}"
+                    False,
+                    f"Failed to update description for #{channel_name}: Rate limit exceeded after {max_retries} retries"
                 )
                 
-        except SlackApiError as e:
-            error = e.response["error"]
-            error_messages = {
-                "not_in_channel": f"Cannot update description for #{channel_name}: You must be a member of the channel",
-                "is_archived": f"Cannot update description for #{channel_name}: Channel is archived",
-                "missing_scope": f"Cannot update description for #{channel_name}: Missing required permissions",
-                "not_authorized": f"Cannot update description for #{channel_name}: You don't have permission to update the description"
-            }
+        except Exception as e:
+            # For any other unexpected errors
+            # Leave the channel if we joined but encountered an error
+            if not was_member:
+                try:
+                    print(f"Leaving channel #{channel_name} after error...")
+                    self.client.conversations_leave(channel=channel_id)
+                except Exception:
+                    pass
+            
             return ChannelActionResult(
-                False, 
-                error_messages.get(error, f"Failed to update description for #{channel_name}: {error}")
+                False,
+                f"Unexpected error updating description for #{channel_name}: {str(e)}"
             ) 
