@@ -2,6 +2,7 @@ import os
 import asyncio
 import json
 import time
+import sys
 from typing import List, Dict, Optional
 from slack_sdk.errors import SlackApiError
 from .slack_client import get_slack_client
@@ -12,6 +13,7 @@ from .channel_data import (
 )
 from .sheet_manager import SheetManager
 from .channel_actions import ChannelActionHandler, ChannelAction
+from datetime import datetime
 
 # Cache file path (in project directory)
 CACHE_FILE = "channel_activity_cache.json"
@@ -288,475 +290,268 @@ async def get_channel_info(client, channel_id: str) -> Dict:
 
 async def get_user_approval(client, channel: Dict, action: str, target_value: Optional[str] = None, current_channels: Optional[List[Dict]] = None) -> bool:
     """
-    Get user approval for an action.
+    Get user approval for a channel action.
     
     Args:
         client: Slack client
-        channel: Channel dictionary
+        channel: Channel to perform action on
         action: Action to perform
-        target_value: Target value for rename action or target channel for archive
-        current_channels: Optional list of current channels to validate against
-    """
-    action_desc = {
-        ChannelAction.KEEP.value: "keep as is",
-        ChannelAction.ARCHIVE.value: target_value and f"archive (with notice to join #{target_value})" or "archive",
-        ChannelAction.RENAME.value: f"rename to '{target_value}'"
-    }
-    
-    desc = action_desc.get(action, action)
-    channel_name = f"#{channel['name']}"
-    if channel.get("is_private"):
-        channel_name = f"🔒 {channel_name}"
-    
-    # Get detailed channel info
-    channel_info = await get_channel_info(client, channel["channel_id"])
-    
-    print("\n" + "=" * 80)
-    print(f"Channel: {channel_name}")
-    print(f"Members: {channel_info.get('num_members', 'unknown')}")
-    print(f"Created: {channel.get('created_date', 'unknown')}")
-    if channel_info.get("purpose", {}).get("value"):
-        print(f"Purpose: {channel_info['purpose']['value']}")
-    if channel_info.get("topic", {}).get("value"):
-        print(f"Topic: {channel_info['topic']['value']}")
-    
-    # Show last activity if available
-    if channel_info.get("last_read"):
-        try:
-            from datetime import datetime
-            last_read = datetime.fromtimestamp(float(channel_info["last_read"]))
-            # Skip if date is Unix epoch (indicates no activity)
-            if last_read.year > 1970:
-                print(f"Last Activity: {last_read.strftime('%Y-%m-%d')}")
-            else:
-                print("Last Activity: No activity recorded")
-        except ValueError:
-            print("Last Activity: Unable to parse timestamp")
-    
-    print(f"\nProposed Action: {desc}")
-    
-    # For archive actions with target channel, show target channel info
-    if action == ChannelAction.ARCHIVE.value and target_value:
-        try:
-            # Get target channel info by name from current_channels if available
-            target = None
-            target_name = target_value.lstrip('#')
-            
-            if current_channels:
-                target = next((ch for ch in current_channels if ch["name"] == target_name), None)
-            else:
-                # Fallback to API call if current_channels not provided
-                target_channels = client.conversations_list(
-                    types="public_channel,private_channel",
-                    exclude_archived=True
-                )["channels"]
-                target = next((ch for ch in target_channels if ch["name"] == target_name), None)
-            
-            if target:
-                # Now get detailed info using the correct channel ID
-                target_info = await get_channel_info(client, target["id"])
-                print("\nTarget Channel Information:")
-                print(f"Members: {target_info.get('num_members', 'unknown')}")
-                if target_info.get("purpose", {}).get("value"):
-                    print(f"Purpose: {target_info['purpose']['value']}")
-                if target_info.get("topic", {}).get("value"):
-                    print(f"Topic: {target_info['topic']['value']}")
-                    
-                # Warn about redirecting to a smaller channel
-                source_members = int(channel.get("num_members", 0))
-                target_members = int(target_info.get('num_members', 0))
-                if target_members < source_members:
-                    print("\n⚠️  Warning: Target channel has fewer members than source channel!")
-            else:
-                print(f"\n⚠️  Warning: Target channel #{target_value} not found!")
-                while True:
-                    response = input("\nPress 'r' to try a different target channel, 'n' to skip, or 'q' to quit: ").lower()
-                    if response == 'q':
-                        raise KeyboardInterrupt("User requested to quit")
-                    if response == 'n':
-                        return False
-                    if response == 'r':
-                        new_target = input("\nEnter new target channel name (without #): ").strip().lower()
-                        if not new_target:
-                            print("Name cannot be empty")
-                            continue
-                        if ' ' in new_target or '.' in new_target:
-                            print("Name cannot contain spaces or periods")
-                            continue
-                        channel["target_value"] = new_target
-                        return await get_user_approval(client, channel, action, new_target, current_channels)
-        except SlackApiError:
-            print(f"\n⚠️  Warning: Could not fetch target channel information")
-            while True:
-                response = input("\nPress 'n' to skip, or 'q' to quit: ").lower()
-                if response == 'q':
-                    raise KeyboardInterrupt("User requested to quit")
-                if response == 'n':
-                    return False
-    
-    # For rename actions, validate the new name
-    if action == ChannelAction.RENAME.value and target_value:
-        # Check length
-        if len(target_value) > 80:
-            print("\n❌ Error: Channel name is too long!")
-            print("Channel names must be 80 characters or less")
-            while True:
-                response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
-                if response == 'q':
-                    raise KeyboardInterrupt("User requested to quit")
-                if response == 'n':
-                    return False
-                if response == 'r':
-                    new_name = input("\nEnter new channel name (without #): ").strip().lower()
-                    if not new_name:
-                        print("Name cannot be empty")
-                        continue
-                    channel["target_value"] = new_name
-                    return await get_user_approval(client, channel, action, new_name, current_channels)
-            
-        # Check format
-        if not target_value.islower() or ' ' in target_value or '.' in target_value:
-            print("\n❌ Error: Invalid channel name format!")
-            print("Channel names must:")
-            print("- Be lowercase")
-            print("- Not contain spaces or periods")
-            print("- Only use letters, numbers, hyphens, and underscores")
-            while True:
-                response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
-                if response == 'q':
-                    raise KeyboardInterrupt("User requested to quit")
-                if response == 'n':
-                    return False
-                if response == 'r':
-                    new_name = input("\nEnter new channel name (without #): ").strip().lower()
-                    if not new_name:
-                        print("Name cannot be empty")
-                        continue
-                    channel["target_value"] = new_name
-                    return await get_user_approval(client, channel, action, new_name, current_channels)
-            
-        # Check valid characters
-        if not all(c.islower() or c.isdigit() or c in '-_' for c in target_value):
-            print("\n❌ Error: Channel name contains invalid characters!")
-            print("Only lowercase letters, numbers, hyphens, and underscores are allowed")
-            while True:
-                response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
-                if response == 'q':
-                    raise KeyboardInterrupt("User requested to quit")
-                if response == 'n':
-                    return False
-                if response == 'r':
-                    new_name = input("\nEnter new channel name (without #): ").strip().lower()
-                    if not new_name:
-                        print("Name cannot be empty")
-                        continue
-                    channel["target_value"] = new_name
-                    return await get_user_approval(client, channel, action, new_name, current_channels)
+        target_value: Target value for action
+        current_channels: List of all current channels (for validation)
         
-        # Check if name is already taken (using current_channels if available)
-        if current_channels:
-            if any(ch["name"] == target_value for ch in current_channels):
-                print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
-                while True:
-                    response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
-                    if response == 'q':
-                        raise KeyboardInterrupt("User requested to quit")
-                    if response == 'n':
-                        return False
-                    if response == 'r':
-                        new_name = input("\nEnter new channel name (without #): ").strip().lower()
-                        if not new_name:
-                            print("Name cannot be empty")
-                            continue
-                        if ' ' in new_name or '.' in new_name:
-                            print("Name cannot contain spaces or periods")
-                            continue
-                        channel["target_value"] = new_name
-                        return await get_user_approval(client, channel, action, new_name, current_channels)
-        else:
-            try:
-                existing = client.conversations_list(
-                    types="public_channel,private_channel",
-                    exclude_archived=True
-                )["channels"]
-                if any(ch["name"] == target_value for ch in existing):
-                    print(f"\n❌ Error: Channel name '{target_value}' is already taken!")
-                    while True:
-                        response = input("\nPress 'r' to try a different name, 'n' to skip, or 'q' to quit: ").lower()
-                        if response == 'q':
-                            raise KeyboardInterrupt("User requested to quit")
-                        if response == 'n':
-                            return False
-                        if response == 'r':
-                            new_name = input("\nEnter new channel name (without #): ").strip().lower()
-                            if not new_name:
-                                print("Name cannot be empty")
-                                continue
-                            if ' ' in new_name or '.' in new_name:
-                                print("Name cannot contain spaces or periods")
-                                continue
-                            channel["target_value"] = new_name
-                            return await get_user_approval(client, channel, action, new_name, current_channels)
-            except SlackApiError:
-                print("\n⚠️  Warning: Could not validate channel name availability")
+    Returns:
+        bool: Whether the action was approved
+    """
+    channel_id = channel["channel_id"]
+    channel_name = channel["name"]
     
-    if channel.get("notes"):
-        print(f"\nNotes: {channel['notes']}")
-    print("-" * 80)
+    # Get additional channel info
+    try:
+        channel_info = await get_channel_info(client, channel_id)
+        
+        # Format creation date
+        created_ts = float(channel_info.get("created", 0))
+        created_date = datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d")
+        
+        # Get member count
+        num_members = channel_info.get("num_members", "unknown")
+        
+        # Check if channel is private
+        is_private = "Yes" if channel_info.get("is_private", False) else "No"
+        
+        # Check if channel is shared
+        is_shared = "Yes" if channel_info.get("is_shared", False) else "No"
+        
+        # Get last activity
+        last_activity = "unknown"
+        if "latest" in channel_info and channel_info["latest"]:
+            latest_ts = float(channel_info["latest"].get("ts", 0))
+            if latest_ts > 0:
+                last_activity = datetime.fromtimestamp(latest_ts).strftime("%Y-%m-%d")
+                
+                # Calculate days since last activity
+                days_since = (datetime.now() - datetime.fromtimestamp(latest_ts)).days
+                if days_since == 0:
+                    last_activity += " (today)"
+                elif days_since == 1:
+                    last_activity += " (yesterday)"
+                else:
+                    last_activity += f" ({days_since} days ago)"
+    except Exception as e:
+        print(f"⚠️  Warning: Could not fetch additional info for #{channel_name}: {str(e)}")
+        channel_info = {}
+        created_date = "unknown"
+        num_members = "unknown"
+        is_private = "unknown"
+        is_shared = "unknown"
+        last_activity = "unknown"
     
-    # Extra warning for destructive actions
+    # Print channel info
+    print(f"\n{'=' * 80}")
+    print(f"Channel: #{channel_name} ({channel_id})")
+    print(f"Created: {created_date}")
+    print(f"Members: {num_members}")
+    print(f"Private: {is_private}")
+    print(f"Shared: {is_shared}")
+    print(f"Last Activity: {last_activity}")
+    
+    # Print action info
+    print(f"\nAction: {action.upper()}")
+    if target_value:
+        if action == ChannelAction.RENAME.value:
+            print(f"New name: #{target_value}")
+        elif action == ChannelAction.ARCHIVE.value:
+            print(f"Redirect to: #{target_value}")
+    
+    # Print warning for destructive actions
     if action == ChannelAction.ARCHIVE.value:
-        print("\n⚠️  WARNING: This is a destructive action that cannot be easily undone!")
-        print("The channel will be archived and members will need to be manually re-added if restored.")
-        if target_value:
-            print("Members will need to manually join the target channel.")
+        print("\n⚠️  WARNING: Archiving is permanent and cannot be undone by this script!")
+        if is_shared == "Yes":
+            print("⛔ CRITICAL: This is a shared channel. Archiving may affect external organizations!")
     
+    # Print tip about Ctrl+C
+    print("\nTip: Press Ctrl+C at any time to pause the process")
+    
+    # Get user approval
     while True:
-        response = input("\nPress 'y' to approve, 'n' to skip, or 'q' to quit: ").lower()
-        if response == 'q':
-            raise KeyboardInterrupt("User requested to quit")
-        if response in ['y', 'n']:
-            return response == 'y'
+        if action == ChannelAction.ARCHIVE.value:
+            response = input("\nApprove this action? (y/n/a/q) [y=yes, n=no, a=yes to all, q=quit]: ").lower()
+        else:
+            response = input("\nApprove this action? (y/n/a/q) [y=yes, n=no, a=yes to all, q=quit]: ").lower()
+        
+        if response == "y" or response == "yes":
+            return True
+        elif response == "n" or response == "no":
+            return False
+        elif response == "a":
+            print("Approving all remaining actions...")
+            return "all"
+        elif response == "q":
+            print("Quitting...")
+            sys.exit(0)
+        else:
+            print("Invalid response. Please enter y, n, a, or q.")
 
 async def execute_channel_actions(channels: List[Dict], dry_run: bool = False, batch_size: int = 10) -> List[str]:
-    """Process pending actions for the specified channels.
+    """
+    Execute actions on channels.
     
     Args:
         channels: List of channels to process
         dry_run: Whether to simulate execution without making changes
         batch_size: Number of channels to confirm at once (0 for individual confirmation)
-    
+        
     Returns:
-        List of channel IDs that were successfully processed
+        List[str]: List of channel IDs that were successfully processed
     """
+    if not channels:
+        print("No actions to execute.")
+        return []
+    
+    # Initialize Slack client
     client = get_slack_client()
+    
+    # Create action handler
     handler = ChannelActionHandler(client)
     
-    successful = 0
-    failed = 0
-    skipped = 0
-    last_action = None
-    successful_channel_ids = []  # Track successful channels
-    
-    # Action descriptions for messages
-    action_desc = {
-        ChannelAction.KEEP.value: "keep as is",
-        ChannelAction.ARCHIVE.value: "archive",
-        ChannelAction.RENAME.value: "rename to"
-    }
-    
-    print("\nExecuting channel actions:")
-    print("=" * 80)
-    if batch_size > 0:
-        print(f"Channels will be processed in batches of {batch_size}")
-        print("For each batch, you can:")
-        print("- Press 'y' to approve all")
-        print("- Press 'n' to skip all")
-        print("- Press 'i' to review individually")
-        print("- Press 'q' to quit the process")
-    else:
-        print("For each action, you can:")
-        print("- Press 'y' to approve")
-        print("- Press 'n' to skip")
-        print("- Press 'q' to quit the process")
-    
-    print("\nNotes:")
-    print("- Destructive actions (archive) require additional confirmation")
-    print("- Actions are sorted to process renames before archives")
-    if dry_run:
-        print("\n🔍 DRY RUN MODE - No changes will be made to channels")
-    print("=" * 80)
-    
+    # Get current channels for validation
+    print("Fetching current channel list for validation...")
     try:
-        # Sort channels by action type (renames first, then archives)
-        def action_priority(channel):
-            action = channel.get("action", "").lower()
-            if not action:  # Handle missing action
-                return 3
-            if action == ChannelAction.KEEP.value:
-                return 2
-            elif action == ChannelAction.RENAME.value:
-                return 0
-            elif action == ChannelAction.ARCHIVE.value:
-                return 1
-            return 3
-        
-        channels = sorted(channels, key=action_priority)
-        
-        # Get current channels once for validation (use cache for performance)
-        print("\nLoading channel data for validation...")
         current_channels = await get_all_channels(use_cache=True, dry_run=dry_run)
-        
-        # Process channels in batches if batch_size > 0
-        batch_channels = []
-        batch_count = 0
-        
-        for i, channel in enumerate(channels):
-            # Skip invalid channels
-            if not channel.get("channel_id") or not channel.get("name"):
-                print(f"⚠️  Skipping invalid channel: {channel}")
-                skipped += 1
-                continue
-                
-            action = channel.get("action", "").lower()
-            
-            # Skip if action is "keep" or invalid
-            if not action or action == ChannelAction.KEEP.value:
-                continue
-                
-            # Validate action is supported
-            if action not in ChannelAction.values():
-                print(f"⚠️  Skipping unsupported action '{action}' for channel {channel['name']}")
-                skipped += 1
-                continue
-            
-            # For batch processing
-            if batch_size > 0:
-                batch_channels.append(channel)
-                batch_count += 1
-                
-                # Process batch when we reach batch_size or at the end
-                if batch_count >= batch_size or i == len(channels) - 1:
-                    if batch_channels:
-                        # Display batch summary
-                        print("\n" + "=" * 80)
-                        print(f"Batch of {len(batch_channels)} channels:")
-                        for idx, ch in enumerate(batch_channels, 1):
-                            ch_action = ch.get("action", "").lower()
-                            ch_name = f"#{ch['name']}"
-                            if ch.get("is_private"):
-                                ch_name = f"🔒 {ch_name}"
-                            
-                            action_message = action_desc.get(ch_action, ch_action)
-                            if ch_action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
-                                action_message = f"{action_message} {ch.get('target_value', '')}"
-                                
-                            print(f"{idx}. {action_message}: {ch_name}")
-                        
-                        # Get batch approval
-                        while True:
-                            response = input("\nPress 'y' to approve all, 'n' to skip all, 'i' for individual review, or 'q' to quit: ").lower()
-                            if response == 'q':
-                                raise KeyboardInterrupt("User requested to quit")
-                            if response in ['y', 'n', 'i']:
-                                break
-                        
-                        if response == 'y':
-                            # Process all channels in batch
-                            for ch in batch_channels:
-                                result = await process_single_channel(ch, handler, client, current_channels, dry_run)
-                                if result == "success":
-                                    successful += 1
-                                    successful_channel_ids.append(ch["channel_id"])
-                                    last_action = (ch, ch.get("action"), ch.get("target_value"))
-                                elif result == "failed":
-                                    failed += 1
-                                elif result == "skipped":
-                                    skipped += 1
-                        elif response == 'n':
-                            # Skip all channels in batch
-                            skipped += len(batch_channels)
-                            print(f"⏭️  Skipped {len(batch_channels)} actions")
-                        elif response == 'i':
-                            # Process channels individually
-                            for ch in batch_channels:
-                                try:
-                                    approved = await get_user_approval(client, ch, ch.get("action"), ch.get("target_value"), current_channels)
-                                    if not approved:
-                                        print("⏭️  Action skipped")
-                                        skipped += 1
-                                        continue
-                                except KeyboardInterrupt:
-                                    print("\n⛔ Process interrupted by user")
-                                    raise
-                                except Exception as e:
-                                    print(f"❌ Error getting approval for {ch['name']}: {str(e)}")
-                                    failed += 1
-                                    continue
-                                
-                                result = await process_single_channel(ch, handler, client, current_channels, dry_run)
-                                if result == "success":
-                                    successful += 1
-                                    successful_channel_ids.append(ch["channel_id"])
-                                    last_action = (ch, ch.get("action"), ch.get("target_value"))
-                                elif result == "failed":
-                                    failed += 1
-                                elif result == "skipped":
-                                    skipped += 1
-                        
-                        # Reset batch
-                        batch_channels = []
-                        batch_count = 0
-                        
-                        # Small delay between batches
-                        await asyncio.sleep(0.5)
-            else:
-                # Individual processing (original behavior)
-                try:
-                    approved = await get_user_approval(client, channel, action, channel.get("target_value"), current_channels)
-                    if not approved:
-                        print("⏭️  Action skipped")
-                        skipped += 1
-                        continue
-                except KeyboardInterrupt:
-                    print("\n⛔ Process interrupted by user")
-                    break
-                except Exception as e:
-                    print(f"❌ Error getting approval for {channel['name']}: {str(e)}")
-                    failed += 1
-                    continue
-                
-                result = await process_single_channel(channel, handler, client, current_channels, dry_run)
-                if result == "success":
-                    successful += 1
-                    successful_channel_ids.append(channel["channel_id"])
-                    last_action = (channel, action, channel.get("target_value"))
-                elif result == "failed":
-                    failed += 1
-                elif result == "skipped":
-                    skipped += 1
-    
-    except KeyboardInterrupt:
-        print("\n⛔ Process interrupted by user")
     except Exception as e:
-        print(f"\n❌ Unexpected error: {str(e)}")
+        print(f"Warning: Could not fetch current channels for validation: {str(e)}")
+        current_channels = []
     
-    finally:
-        print("\nExecution Summary:")
-        print(f"Successful actions: {successful}")
-        print(f"Failed actions: {failed}")
-        print(f"Skipped actions: {skipped}")
-        print(f"Total channels processed: {successful + failed + skipped}")
+    # Count actions by type
+    action_counts = {}
+    for channel in channels:
+        action = channel.get("action", "")
+        action_counts[action] = action_counts.get(action, 0) + 1
+    
+    # Print summary
+    print("\nPreparing to execute the following actions:")
+    for action, count in action_counts.items():
+        print(f"- {action.upper()}: {count} channels")
+    
+    if dry_run:
+        print("\n⚠️  DRY RUN MODE - No changes will be made")
+    else:
+        print("\n⚠️  LIVE MODE - Changes will be applied to your Slack workspace")
         
-        # Add summary of what was done
-        if successful > 0:
-            action_counts = {}
-            for channel in channels:
-                if channel.get("channel_id") in successful_channel_ids:
-                    action = channel.get("action", "").lower()
-                    action_counts[action] = action_counts.get(action, 0) + 1
+        # Check for mass archiving
+        archive_count = action_counts.get(ChannelAction.ARCHIVE.value, 0)
+        if archive_count > 10:
+            print(f"\n⛔ WARNING: You are about to archive {archive_count} channels!")
+            print("This is a destructive action that cannot be easily undone.")
+            confirm = input("Type 'confirm-archive' to proceed or anything else to abort: ")
+            if confirm != "confirm-archive":
+                print("Aborting mass archive operation.")
+                return []
+    
+    # Process channels
+    successful_channel_ids = []
+    yes_to_all = False
+    
+    # Sort channels by action priority
+    def action_priority(channel):
+        """Sort channels by action priority."""
+        action = channel.get("action", "")
+        # Process renames before archives
+        if action == ChannelAction.RENAME.value:
+            return 0
+        elif action == ChannelAction.ARCHIVE.value:
+            return 1
+        else:
+            return 2
+    
+    channels = sorted(channels, key=action_priority)
+    
+    # Process in batches if requested
+    if batch_size > 0:
+        for i in range(0, len(channels), batch_size):
+            batch = channels[i:i+batch_size]
             
-            summary_parts = []
-            for action, count in action_counts.items():
-                if action == ChannelAction.ARCHIVE.value:
-                    summary_parts.append(f"{count} archived")
-                elif action == ChannelAction.RENAME.value:
-                    summary_parts.append(f"{count} renamed")
+            # Print batch header
+            print(f"\n{'=' * 80}")
+            print(f"Processing batch {i//batch_size + 1} of {(len(channels) + batch_size - 1)//batch_size}")
+            print(f"{'=' * 80}")
             
-            if summary_parts:
-                print(f"\nCompleted: {', '.join(summary_parts)}")
-        
-        if last_action and last_action[1] == ChannelAction.ARCHIVE.value:
-            print("\nNote: To undo the last archive action, use the Slack UI:")
-            print("1. Go to channel #" + last_action[0]['name'])
-            print("2. Click the gear icon ⚙️")
-            print("3. Select 'Additional options'")
-            print("4. Choose 'Unarchive channel'")
-        
-        return successful_channel_ids  # Return the list of successful channel IDs
+            # Print batch summary
+            print("\nActions in this batch:")
+            for channel in batch:
+                action = channel.get("action", "")
+                name = channel.get("name", "")
+                target = channel.get("target_value", "")
+                if target:
+                    print(f"- {action.upper()} #{name} -> {target}")
+                else:
+                    print(f"- {action.upper()} #{name}")
+            
+            # Get batch approval if not yes_to_all
+            if not yes_to_all:
+                if dry_run:
+                    response = input("\nReview this batch? (y/n/a/q) [y=yes, n=skip batch, a=yes to all, q=quit]: ").lower()
+                else:
+                    response = input("\nApprove this batch? (y/n/a/q) [y=yes, n=skip batch, a=yes to all, q=quit]: ").lower()
+                
+                if response == "n" or response == "no":
+                    print("Skipping batch...")
+                    continue
+                elif response == "a":
+                    print("Approving all remaining batches...")
+                    yes_to_all = True
+                elif response == "q":
+                    print("Quitting...")
+                    break
+                # else proceed with batch
+            
+            # Process each channel in the batch
+            for channel in batch:
+                result = await process_single_channel(channel, handler, client, current_channels, dry_run, yes_to_all)
+                if result == "success":
+                    successful_channel_ids.append(channel["channel_id"])
+                elif result == "all":
+                    yes_to_all = True
+    else:
+        # Process channels individually
+        try:
+            for i, channel in enumerate(channels):
+                print(f"\nProcessing channel {i+1} of {len(channels)}")
+                result = await process_single_channel(channel, handler, client, current_channels, dry_run, yes_to_all)
+                if result == "success":
+                    successful_channel_ids.append(channel["channel_id"])
+                elif result == "all":
+                    yes_to_all = True
+        except KeyboardInterrupt:
+            print("\n\nProcess paused. What would you like to do?")
+            response = input("Press Enter to continue, 'q' to quit, or 'a' to approve all remaining: ").lower()
+            
+            if response == 'q':
+                print("Quitting...")
+                return successful_channel_ids
+            elif response == 'a':
+                print("Approving all remaining actions...")
+                yes_to_all = True
+                
+                # Process remaining channels with yes_to_all
+                try:
+                    for j in range(i, len(channels)):
+                        channel = channels[j]
+                        result = await process_single_channel(channel, handler, client, current_channels, dry_run, yes_to_all)
+                        if result == "success":
+                            successful_channel_ids.append(channel["channel_id"])
+                except Exception as e:
+                    print(f"Error processing remaining channels: {str(e)}")
+    
+    # Print summary
+    print("\nExecution summary:")
+    print(f"- Successfully processed: {len(successful_channel_ids)} channels")
+    print(f"- Remaining: {len(channels) - len(successful_channel_ids)} channels")
+    
+    return successful_channel_ids
 
 # Helper function to process a single channel
-async def process_single_channel(channel, handler, client, current_channels, dry_run):
+async def process_single_channel(channel, handler, client, current_channels, dry_run, yes_to_all):
     """Process a single channel and return the result status."""
     channel_name = f"#{channel['name']}"
     if channel.get("is_private"):
