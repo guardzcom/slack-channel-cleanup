@@ -3,7 +3,8 @@
 *.env
 .env.*
 
-# Generated CSV files
+# Data and Config files
+*.json
 *.csv
 *.csv.bak
 
