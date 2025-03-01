@@ -290,6 +290,8 @@ class ChannelActionHandler:
         new_description: str
     ) -> ChannelActionResult:
         """Update a channel's description (purpose)."""
+        was_member = True  # Track if we were originally a member
+        
         try:
             # Check if channel exists and is not archived
             try:
@@ -309,11 +311,48 @@ class ChannelActionHandler:
                     )
                 raise
             
+            # Try to join the channel if needed
+            try:
+                # First check if we're already a member
+                try:
+                    self.client.conversations_info(channel=channel_id)
+                    # Try to post a message to check if we're a member
+                    try:
+                        # This will fail with not_in_channel if we're not a member
+                        self.client.conversations_mark(channel=channel_id, ts="0")
+                    except SlackApiError as e:
+                        if e.response["error"] == "not_in_channel":
+                            was_member = False
+                            # Join the channel
+                            print(f"Joining channel #{channel_name} to update description...")
+                            self.client.conversations_join(channel=channel_id)
+                except SlackApiError:
+                    # If we can't check, assume we need to join
+                    was_member = False
+                    self.client.conversations_join(channel=channel_id)
+            except SlackApiError as e:
+                if e.response["error"] in ["method_not_supported_for_channel_type", "channel_not_found"]:
+                    # Can't join DMs or private channels we're not invited to
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot update description for #{channel_name}: Not a member and unable to join"
+                    )
+                # For other errors, continue and try to update anyway
+            
             # Update the channel purpose
             response = self.client.conversations_setPurpose(
                 channel=channel_id,
                 purpose=new_description
             )
+            
+            # Leave the channel if we weren't originally a member
+            if not was_member:
+                try:
+                    print(f"Leaving channel #{channel_name} after updating description...")
+                    self.client.conversations_leave(channel=channel_id)
+                except SlackApiError:
+                    # If we can't leave, just continue
+                    pass
             
             if response["ok"]:
                 return ChannelActionResult(
