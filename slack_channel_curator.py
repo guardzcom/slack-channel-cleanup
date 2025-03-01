@@ -8,7 +8,7 @@ from src.channel_manager import (
     get_all_channels,
     execute_channel_actions
 )
-from src.channel_csv import (
+from src.channel_data import (
     read_channels_from_csv,
     create_csv_writer,
     create_channel_dict

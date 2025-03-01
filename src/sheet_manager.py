@@ -6,8 +6,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from .channel_actions import ChannelAction
-from .channel_csv import (
-    CSV_HEADERS,
+from .channel_data import (
+    CHANNEL_HEADERS,
     create_channel_dict,
     validate_channel,
     validate_headers
@@ -151,7 +151,7 @@ class SheetManager:
             channels: List of channels to write
             clear_actions: Whether to clear any actions (set to keep)
         """
-        headers = list(CSV_HEADERS)
+        headers = list(CHANNEL_HEADERS)
         values = [headers]
         
         for channel in channels:

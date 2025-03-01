@@ -3,7 +3,7 @@ import asyncio
 from typing import List, Dict, Optional
 from slack_sdk.errors import SlackApiError
 from .slack_client import get_slack_client
-from .channel_csv import (
+from .channel_data import (
     read_channels_from_csv,
     create_csv_writer,
     write_channel_to_csv

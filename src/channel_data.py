@@ -4,7 +4,7 @@ from datetime import datetime
 from .channel_actions import ChannelAction
 import os
 
-# Common headers for both CSV and Google Sheets
+# Standard data structure for channel information
 CHANNEL_HEADERS = [
     "channel_id",
     "name",
@@ -24,8 +24,7 @@ def get_default_filename() -> str:
 
 def create_csv_writer(filename: str = None):
     """
-    Create and initialize a CSV writer.
-    Returns the file object and writer.
+    Create and initialize a CSV writer for channel data.
     
     Args:
         filename: Optional filename, if not provided will generate one
@@ -48,7 +47,10 @@ def create_csv_writer(filename: str = None):
         raise IOError(f"Failed to create CSV file {filename}: {str(e)}")
 
 def create_channel_dict(channel: Dict) -> Dict:
-    """Create a standardized channel dictionary from Slack channel data."""
+    """
+    Create a standardized channel dictionary from Slack channel data.
+    Converts raw Slack API data into our standard data structure.
+    """
     # Get last activity from latest message timestamp if available
     last_activity = ""
     if channel.get("latest"):
@@ -72,14 +74,13 @@ def create_channel_dict(channel: Dict) -> Dict:
     }
 
 def write_channel_to_csv(writer: csv.DictWriter, channel: Dict):
-    """Write a single channel to CSV."""
+    """Write a single channel to CSV file."""
     row = create_channel_dict(channel)
     writer.writerow(row)
 
 def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
     """
     Validate channel data, raising ValueError if invalid.
-    Used for both CSV and Google Sheets data validation.
     
     Args:
         channel: Channel dictionary to validate
@@ -111,13 +112,25 @@ def validate_channel(channel: Dict, validate_headers: bool = False) -> None:
         )
 
 def validate_headers(headers: List[str]) -> None:
-    """Validate that all required headers are present."""
+    """Validate that all required headers are present in the data structure."""
     missing = set(CHANNEL_HEADERS) - set(headers)
     if missing:
         raise ValueError(f"Missing required headers: {', '.join(missing)}")
 
 def read_channels_from_csv(filename: str) -> List[Dict]:
-    """Read channel actions from a CSV file."""
+    """
+    Read channel data from a CSV file.
+    
+    Args:
+        filename: Path to the CSV file
+        
+    Returns:
+        List[Dict]: List of channel dictionaries
+        
+    Raises:
+        IOError: If file cannot be read
+        ValueError: If CSV format is invalid
+    """
     if not os.path.exists(filename):
         raise IOError(f"CSV file not found: {filename}")
         
