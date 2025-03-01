@@ -141,6 +141,8 @@ async def main():
                         if channel["channel_id"] in successful_channel_ids:
                             if channel["action"] == ChannelAction.RENAME.value:
                                 channel["name"] = channel["target_value"]
+                            elif channel["action"] == ChannelAction.UPDATE_DESCRIPTION.value:
+                                channel["description"] = channel["target_value"]
                             channel["action"] = ChannelAction.KEEP.value
                             channel["target_value"] = ""
                     
@@ -202,6 +204,7 @@ async def main():
         print("   - `keep` - No changes (default for existing channels)")
         print("   - `archive` - Archive the channel (optionally specify target channel in 'target_value' for redirect notice)")
         print("   - `rename` - Rename channel (specify new name in 'target_value')")
+        print("   - `update_description` - Update channel description (specify new description in 'target_value')")
         print("2. For archive actions, optionally specify a target channel in 'target_value' (redirect notice will be attempted)")
         print("3. Run the script again to process your changes")
             

@@ -21,7 +21,7 @@ Managing Slack channels at scale can be tedious and error-prone. This tool helps
 
 - 🔍 Maintains a spreadsheet of all channels (public and private)
 - 📝 Review and plan changes in your preferred format (CSV or Google Sheets)
-- 🔄 Bulk actions: rename or archive channels (with optional redirect notices)
+- 🔄 Bulk actions: rename, archive, or update descriptions of channels
 - ✨ Interactive approval process with detailed channel info
 - 🛡️ Safe execution with dry-run mode and backups
 - 📊 Real-time progress and summary reporting
@@ -124,8 +124,9 @@ The spreadsheet has the following columns:
 Required columns:
 - channel_id: Slack's internal channel ID
 - name: Channel name
-- action: What action to take (keep, archive, rename)
-- target_value: Target for rename or archive redirect
+- description: Channel purpose/description
+- action: What action to take (keep, archive, rename, update_description)
+- target_value: Target for rename, archive redirect, or new description
 
 Optional columns:
 - is_private: Whether the channel is private
@@ -141,6 +142,7 @@ To make changes:
    - `keep` - No changes (default for existing channels)
    - `archive` - Archive the channel. Optionally specify a target channel in `target_value` to post a redirect notice
    - `rename` - Rename channel (set new name in `target_value`)
+   - `update_description` - Update channel description (set new description in `target_value`)
 2. Run the script again to process your changes
 3. The script will:
    - Show you each proposed change

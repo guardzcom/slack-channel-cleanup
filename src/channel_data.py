@@ -16,6 +16,7 @@ REQUIRED_HEADERS = [
 CHANNEL_HEADERS = [
     "channel_id",
     "name",
+    "description",
     "is_private",
     "is_shared",
     "member_count",
@@ -57,7 +58,7 @@ def create_csv_writer(filename: str = None):
 
 def create_channel_dict(channel: Dict, is_new: bool = True) -> Dict:
     """
-    Create a standardized channel dictionary from Slack channel data.
+    Create a standardized channel dictionary from Slack API channel data.
     Converts raw Slack API data into our standard data structure.
     
     Args:
@@ -78,6 +79,7 @@ def create_channel_dict(channel: Dict, is_new: bool = True) -> Dict:
     result = {
         "channel_id": channel["id"],
         "name": channel["name"],
+        "description": channel.get("purpose", {}).get("value", ""),
         "action": ChannelAction.NEW.value if is_new else ChannelAction.KEEP.value,
         "target_value": ""
     }

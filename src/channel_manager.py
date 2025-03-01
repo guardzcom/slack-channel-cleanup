@@ -322,6 +322,9 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         # Check if channel is shared
         is_shared = "Yes" if channel_info.get("is_shared", False) else "No"
         
+        # Get description (purpose)
+        description = channel_info.get("purpose", {}).get("value", "")
+        
         # Get last activity
         last_activity = "unknown"
         if "latest" in channel_info and channel_info["latest"]:
@@ -344,6 +347,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         num_members = "unknown"
         is_private = "unknown"
         is_shared = "unknown"
+        description = "unknown"
         last_activity = "unknown"
     
     # Print channel info
@@ -353,6 +357,7 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
     print(f"Members: {num_members}")
     print(f"Private: {is_private}")
     print(f"Shared: {is_shared}")
+    print(f"Description: {description}")
     print(f"Last Activity: {last_activity}")
     
     # Print action info
@@ -362,6 +367,8 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
             print(f"New name: #{target_value}")
         elif action == ChannelAction.ARCHIVE.value:
             print(f"Redirect to: #{target_value}")
+        elif action == ChannelAction.UPDATE_DESCRIPTION.value:
+            print(f"New description: {target_value}")
     
     # Print warning for destructive actions
     if action == ChannelAction.ARCHIVE.value:
@@ -561,11 +568,18 @@ async def process_single_channel(channel, handler, client, current_channels, dry
     action_message = {
         ChannelAction.KEEP.value: "keep as is",
         ChannelAction.ARCHIVE.value: "archive",
-        ChannelAction.RENAME.value: "rename to"
+        ChannelAction.RENAME.value: "rename to",
+        ChannelAction.UPDATE_DESCRIPTION.value: "update description to"
     }.get(action, action)
     
     if action in [ChannelAction.ARCHIVE.value, ChannelAction.RENAME.value]:
         action_message = f"{action_message} {channel.get('target_value', '')}"
+    elif action == ChannelAction.UPDATE_DESCRIPTION.value:
+        # Truncate long descriptions in the message
+        description = channel.get('target_value', '')
+        if len(description) > 50:
+            description = description[:47] + "..."
+        action_message = f"{action_message} \"{description}\""
     
     if dry_run:
         print(f"✅ Would {action_message}: {channel_name}")

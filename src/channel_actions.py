@@ -9,6 +9,7 @@ class ChannelAction(str, Enum):
     ARCHIVE = "archive"
     RENAME = "rename"
     NEW = "new"
+    UPDATE_DESCRIPTION = "update_description"
     
     @classmethod
     def values(cls) -> list[str]:
@@ -39,7 +40,8 @@ class ChannelActionHandler:
             channel_id: The Slack channel ID
             channel_name: The current channel name
             action: The action to perform (from ChannelAction)
-            target_value: Additional value needed for archive (target channel for redirect) or rename (new name)
+            target_value: Additional value needed for archive (target channel for redirect), 
+                         rename (new name), or update_description (new description)
             current_channels: Optional list of already-fetched channels to avoid refetching
         """
         try:
@@ -57,6 +59,12 @@ class ChannelActionHandler:
                 if not target_value:
                     return ChannelActionResult(False, f"New name not specified for renaming {channel_name}")
                 response = await self.rename_channel(channel_id, channel_name, target_value)
+                return response
+                
+            elif action == ChannelAction.UPDATE_DESCRIPTION.value:
+                if target_value is None:  # Allow empty string as valid description
+                    return ChannelActionResult(False, f"New description not specified for {channel_name}")
+                response = await self.update_description(channel_id, channel_name, target_value)
                 return response
                 
             else:
@@ -274,3 +282,54 @@ class ChannelActionHandler:
                 "is_archived": f"Cannot rename {old_name}: Channel is archived"
             }
             return ChannelActionResult(False, error_messages.get(error, f"Failed to rename {old_name}: {error}")) 
+
+    async def update_description(
+        self,
+        channel_id: str,
+        channel_name: str,
+        new_description: str
+    ) -> ChannelActionResult:
+        """Update a channel's description (purpose)."""
+        try:
+            # Check if channel exists and is not archived
+            try:
+                channel_info = self.client.conversations_info(channel=channel_id)["channel"]
+                
+                # Check if already archived
+                if channel_info.get("is_archived", False):
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot update description for #{channel_name}: Channel is archived"
+                    )
+            except SlackApiError as e:
+                if e.response["error"] == "channel_not_found":
+                    return ChannelActionResult(
+                        False,
+                        f"Cannot update description for #{channel_name}: Channel not found"
+                    )
+                raise
+            
+            # Update the channel purpose
+            response = self.client.conversations_setPurpose(
+                channel=channel_id,
+                purpose=new_description
+            )
+            
+            if response["ok"]:
+                return ChannelActionResult(
+                    True,
+                    f"Successfully updated description for #{channel_name}"
+                )
+                
+        except SlackApiError as e:
+            error = e.response["error"]
+            error_messages = {
+                "not_in_channel": f"Cannot update description for #{channel_name}: You must be a member of the channel",
+                "is_archived": f"Cannot update description for #{channel_name}: Channel is archived",
+                "missing_scope": f"Cannot update description for #{channel_name}: Missing required permissions",
+                "not_authorized": f"Cannot update description for #{channel_name}: You don't have permission to update the description"
+            }
+            return ChannelActionResult(
+                False, 
+                error_messages.get(error, f"Failed to update description for #{channel_name}: {error}")
+            ) 
