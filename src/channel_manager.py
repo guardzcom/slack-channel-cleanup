@@ -11,7 +11,7 @@ from .channel_csv import (
     update_sheet_from_active_channels as update_csv
 )
 from .sheet_manager import SheetManager
-from .channel_actions import ChannelActionHandler, ChannelAction, ChannelStatus
+from .channel_actions import ChannelActionHandler, ChannelAction
 
 async def get_all_channels(csv_writer=None) -> List[Dict]:
     """
@@ -186,7 +186,6 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         print("The channel will be archived and members will need to be manually re-added if restored.")
         if target_value:
             print("Members will need to manually join the target channel.")
-            print(f"Consider posting an announcement in #{channel['name']} before proceeding.")
     
     while True:
         response = input("\nPress 'y' to approve, 'n' to skip, or 'q' to quit: ").lower()
@@ -195,8 +194,12 @@ async def get_user_approval(client, channel: Dict, action: str, target_value: Op
         if response in ['y', 'n']:
             return response == 'y'
 
-async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -> None:
-    """Execute actions specified in the CSV file."""
+async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -> List[str]:
+    """Execute actions specified in the CSV file.
+    
+    Returns:
+        List of channel IDs that were successfully processed
+    """
     client = get_slack_client()
     handler = ChannelActionHandler(client)
     
@@ -204,6 +207,7 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
     failed = 0
     skipped = 0
     last_action = None
+    successful_channel_ids = []  # Track successful channels
     
     # Action descriptions for messages
     action_desc = {
@@ -282,6 +286,7 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
                 successful += 1
                 print(f"✅ {result.message}")
                 last_action = (channel, action, channel["target_value"])
+                successful_channel_ids.append(channel["channel_id"])  # Add to successful list
             else:
                 failed += 1
                 print(f"❌ {result.message}")
@@ -304,4 +309,6 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False) -
             print(f"1. Go to channel #{last_action[0]['name']}")
             print("2. Click the gear icon ⚙️")
             print("3. Select 'Additional options'")
-            print("4. Choose 'Unarchive channel'") 
+            print("4. Choose 'Unarchive channel'")
+        
+        return successful_channel_ids  # Return the list of successful channel IDs 

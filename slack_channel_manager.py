@@ -52,15 +52,14 @@ async def main():
             print("Fetching channels...")
             channels = await get_all_channels()
             
+            # Export to spreadsheet
             if args.file:
-                # CSV format
                 filename = export_channels_to_csv(channels, args.file)
-                print(f"\nChannels exported to spreadsheet: {filename}")
+                print(f"\nChannels exported to: {args.file}")
             else:
-                # Google Sheets format
                 sheet = SheetManager(args.sheet)
-                sheet.update_from_active_channels(channels)
-                print(f"\nSpreadsheet updated: {args.sheet}")
+                sheet.write_channels(channels)
+                print(f"\nChannels exported to: {args.sheet}")
             
             print("\nNext steps:")
             print("1. Review the channels and set the 'action' column to one of:")
@@ -95,27 +94,35 @@ async def main():
                 print("\nDRY RUN MODE - No changes will be made")
             
             # Execute actions
-            await execute_channel_actions(
-                [ch for ch in channels if ch["action"] != ChannelAction.KEEP.value],
+            channels_to_process = [ch for ch in channels if ch["action"] != ChannelAction.KEEP.value]
+            successful_channel_ids = await execute_channel_actions(
+                channels_to_process,
                 dry_run=args.dry_run
             )
             
             # Update after execution
-            if not args.dry_run:
-                print("\nRefreshing spreadsheet with current channel states...")
-                active_channels = await get_all_channels()
+            if not args.dry_run and successful_channel_ids:
+                print("\nUpdating spreadsheet...")
                 
+                # Clear actions for successful channels
+                for channel in channels:
+                    if channel["channel_id"] in successful_channel_ids:
+                        channel["action"] = ChannelAction.KEEP.value
+                        channel["target_value"] = ""
+                
+                # Write back to spreadsheet
                 if args.file:
-                    # Create fresh CSV with current channels
-                    filename = export_channels_to_csv(active_channels, args.file)
-                    print(f"Spreadsheet updated with current channels: {filename}")
+                    f, writer, _ = create_csv_writer(args.file)
+                    try:
+                        for channel in channels:
+                            writer.writerow(channel)
+                    finally:
+                        f.close()
                 else:
-                    # Update Google Sheet with current channels
                     sheet = SheetManager(args.sheet)
-                    sheet.update_from_active_channels(active_channels)
-                    print(f"Spreadsheet updated with current channels: {args.sheet}")
+                    sheet.write_channels(channels)
                 
-                print("\nNote: Archived channels have been removed and renamed channels updated.")
+                print(f"Actions cleared for {len(successful_channel_ids)} successfully processed channels.")
             
     except ValueError as e:
         print(f"Configuration error: {str(e)}")

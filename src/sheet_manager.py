@@ -11,8 +11,9 @@ from .channel_csv import CSV_HEADERS
 # If modifying these scopes, delete the token.json file.
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-def get_sheet_id_from_url(url: str) -> str:
-    """Extract sheet ID from Google Sheets URL."""
+def get_sheet_id_from_url(url: str) -> Tuple[str, str]:
+    """Extract sheet ID and tab ID from Google Sheets URL."""
+    # Extract spreadsheet ID
     match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
     if not match:
         raise ValueError(
@@ -20,7 +21,13 @@ def get_sheet_id_from_url(url: str) -> str:
             "Expected: https://docs.google.com/spreadsheets/d/YOUR-SHEET-ID\n"
             "Please share your sheet with the service account email in service-account.json"
         )
-    return match.group(1)
+    spreadsheet_id = match.group(1)
+    
+    # Extract tab/sheet ID (gid)
+    gid_match = re.search(r"[#&]gid=(\d+)", url)
+    sheet_id = gid_match.group(1) if gid_match else "0"  # Default to first sheet if not specified
+    
+    return spreadsheet_id, sheet_id
 
 def get_credentials() -> Credentials:
     """Get Google service account credentials."""
@@ -49,10 +56,25 @@ class SheetManager:
     
     def __init__(self, sheet_url: str):
         """Initialize the sheet manager."""
-        self.sheet_id = get_sheet_id_from_url(sheet_url)
+        self.sheet_id, self.tab_id = get_sheet_id_from_url(sheet_url)
         try:
             self.service = build('sheets', 'v4', credentials=get_credentials())
             self.sheet = self.service.spreadsheets()
+            
+            # Get the sheet name from gid
+            sheet_metadata = self.sheet.get(spreadsheetId=self.sheet_id).execute()
+            sheets = sheet_metadata.get('sheets', [])
+            sheet_properties = next(
+                (sheet['properties'] for sheet in sheets if str(sheet['properties'].get('sheetId')) == self.tab_id),
+                None
+            )
+            
+            if not sheet_properties:
+                raise ValueError(f"Sheet with gid={self.tab_id} not found in the spreadsheet")
+                
+            self.tab_name = sheet_properties['title']
+            print(f"Using sheet: {self.tab_name}")
+            
             # Verify we can access the sheet
             self._get_headers()
         except HttpError as e:
@@ -66,7 +88,7 @@ class SheetManager:
         """Get the headers from the first row."""
         result = self.sheet.values().get(
             spreadsheetId=self.sheet_id,
-            range='A1:Z1'
+            range=f"'{self.tab_name}'!A1:Z1"
         ).execute()
         values = result.get('values', [])
         if not values:
@@ -77,7 +99,7 @@ class SheetManager:
         """Get all values from the sheet."""
         result = self.sheet.values().get(
             spreadsheetId=self.sheet_id,
-            range='A:Z'
+            range=f"'{self.tab_name}'!A:Z"
         ).execute()
         return result.get('values', [])
     
@@ -85,7 +107,7 @@ class SheetManager:
         """Update all values in the sheet."""
         self.sheet.values().update(
             spreadsheetId=self.sheet_id,
-            range='A1',
+            range=f"'{self.tab_name}'!A1",
             valueInputOption='RAW',
             body={'values': values}
         ).execute()
@@ -163,4 +185,14 @@ class SheetManager:
                 values.append([row.get(h, '') for h in headers])
         
         # Update the sheet
+        self._update_values(values)
+    
+    def write_channels(self, channels: List[Dict]) -> None:
+        """Write channels to the sheet, preserving all data except clearing actions."""
+        headers = list(CSV_HEADERS)
+        values = [headers]
+        
+        for channel in channels:
+            values.append([channel.get(h, '') for h in headers])
+        
         self._update_values(values) 
