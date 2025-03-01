@@ -117,7 +117,7 @@ async def main():
                 
                 # Clear successful actions
                 if not args.dry_run and successful_channel_ids:
-                    # Remove archived channels and clear actions for renamed ones
+                    # Remove archived channels immediately
                     channels = [ch for ch in channels if 
                               ch["channel_id"] not in successful_channel_ids or 
                               ch["action"] != ChannelAction.ARCHIVE.value]
@@ -136,9 +136,11 @@ async def main():
         if not channels:
             channels = []
         
+        # Track existing channel IDs
+        existing_ids = {ch["channel_id"] for ch in channels}
+        
         # Update existing and add new channels
         current_ids = {ch["id"] for ch in current_channels}
-        existing_ids = {ch["channel_id"] for ch in channels}
         
         # Remove channels that are no longer active
         channels = [ch for ch in channels if ch["channel_id"] in current_ids]
