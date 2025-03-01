@@ -111,7 +111,7 @@ async def main():
             actions = {}
             for channel in channels:
                 action = channel["action"]
-                if action != ChannelAction.KEEP.value:
+                if action != ChannelAction.KEEP.value and action != ChannelAction.NEW.value:
                     actions[action] = actions.get(action, 0) + 1
             
             if actions:
@@ -122,7 +122,7 @@ async def main():
                 if args.dry_run:
                     print("\nDRY RUN MODE - No changes will be made")
                 
-                channels_to_process = [ch for ch in channels if ch["action"] != ChannelAction.KEEP.value]
+                channels_to_process = [ch for ch in channels if ch["action"] != ChannelAction.KEEP.value and ch["action"] != ChannelAction.NEW.value]
                 successful_channel_ids = await execute_channel_actions(
                     channels_to_process,
                     dry_run=args.dry_run,
