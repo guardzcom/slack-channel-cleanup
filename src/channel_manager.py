@@ -35,11 +35,27 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
                 types="public_channel,private_channel",
                 exclude_archived=True,  # Only get active channels
                 limit=200,  # Maximum allowed by Slack API
-                cursor=cursor
+                cursor=cursor,
+                include_num_members=True  # Get member count
             )
             
             if not response["ok"]:
                 raise SlackApiError("Failed to fetch channels", response)
+            
+            # Get latest message for each channel
+            for channel in response["channels"]:
+                try:
+                    history = client.conversations_history(
+                        channel=channel["id"],
+                        limit=1  # Just get the most recent message
+                    )
+                    if history["messages"]:
+                        channel["latest"] = history["messages"][0]
+                except SlackApiError:
+                    pass  # Skip if we can't get history
+                
+                # Respect rate limits
+                await asyncio.sleep(0.5)  # Add small delay between history calls
                 
             new_channels = response["channels"]
             channels.extend(new_channels)
@@ -60,6 +76,14 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
             print("Waiting for rate limit...")
             await asyncio.sleep(1)
             page += 1
+            
+            # Fetch additional info for each channel
+            for channel in response["channels"]:
+                try:
+                    info = client.conversations_info(channel=channel["id"])["channel"]
+                    channel.update(info)  # Update with additional info including last_read
+                except SlackApiError:
+                    pass  # Skip if we can't get additional info
             
         except SlackApiError as e:
             error_code = e.response.get("error", "unknown_error")

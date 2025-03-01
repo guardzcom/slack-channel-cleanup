@@ -10,6 +10,7 @@ CSV_HEADERS = [
     "is_private",
     "member_count",
     "created_date",
+    "last_activity",
     "action",
     "target_value",
     "notes"
@@ -47,12 +48,23 @@ def create_csv_writer(filename: str = None):
 
 def create_channel_dict(channel: Dict) -> Dict:
     """Create a standardized channel dictionary from Slack channel data."""
+    # Get last activity from latest message timestamp if available
+    last_activity = ""
+    if channel.get("latest"):
+        try:
+            last_message = datetime.fromtimestamp(float(channel["latest"].get("ts", 0)))
+            if last_message.year > 1970:  # Skip Unix epoch dates
+                last_activity = last_message.strftime("%Y-%m-%d")
+        except (ValueError, TypeError, AttributeError):
+            pass  # Invalid timestamp or no latest message, leave empty
+            
     return {
         "channel_id": channel["id"],
         "name": channel["name"],
         "is_private": str(channel["is_private"]).lower(),
         "member_count": str(channel["num_members"]),
         "created_date": datetime.fromtimestamp(float(channel["created"])).strftime("%Y-%m-%d"),
+        "last_activity": last_activity,
         "action": ChannelAction.KEEP.value,
         "target_value": "",
         "notes": ""

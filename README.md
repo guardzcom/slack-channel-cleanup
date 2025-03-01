@@ -35,6 +35,8 @@ Managing Slack channels at scale can be tedious and error-prone. This tool helps
   - `channels:write` - For managing public channels
   - `groups:write` - For managing private channels
   - `chat:write` - For posting redirect notices (optional)
+  - `channels:history` - For fetching public channel last activity data
+  - `groups:history` - For fetching private channel last activity data
 
 Note: Admin privileges are recommended for full workspace management capabilities.
 
@@ -114,6 +116,7 @@ The spreadsheet has the following columns:
 - is_private: Whether the channel is private
 - member_count: Number of members
 - created_date: When the channel was created
+- last_activity: Date of the most recent message (YYYY-MM-DD)
 - action: What action to take (keep, archive, rename)
 - target_value: Target for rename or archive redirect
 - notes: Optional notes about the change
@@ -174,6 +177,10 @@ Note: You must specify either --file OR --sheet, but not both.
   - Requires a Google Cloud Project
   - Service account must have editor access to the sheet
   - Sheet URL must be in the correct format
+- Last activity data:
+  - Fetched using conversations.history API (Tier 3 rate limit)
+  - May be empty if channel has no messages or if you lack access permissions
+  - Updates each time the channel list is refreshed
 
 ## Debugging
 
