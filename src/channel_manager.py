@@ -1,5 +1,7 @@
 import os
 import asyncio
+import json
+import time
 from typing import List, Dict, Optional
 from slack_sdk.errors import SlackApiError
 from .slack_client import get_slack_client
@@ -11,35 +13,150 @@ from .channel_data import (
 from .sheet_manager import SheetManager
 from .channel_actions import ChannelActionHandler, ChannelAction
 
+# Cache file path (in project directory)
+CACHE_FILE = "channel_activity_cache.json"
+# Cache expiration in seconds (24 hours)
+CACHE_EXPIRATION = 86400
+
 async def fetch_channel_history(client, channel: Dict) -> None:
     """Fetch history for a single channel."""
-    try:
-        history = client.conversations_history(
-            channel=channel["id"],
-            limit=20,  # Fetch more messages to ensure we get at least one actual message
-            include_all_metadata=False  # We only need the timestamp
-        )
-        # Filter for actual messages (not system messages)
-        messages = [msg for msg in history.get("messages", []) 
-                   if not msg.get("subtype")]
-        if messages:
-            # messages are already sorted by timestamp (newest first)
-            channel["latest"] = messages[0]
-    except SlackApiError:
-        print(f"    ⚠️  Could not fetch history for #{channel['name']}")
 
-async def get_all_channels(csv_writer=None) -> List[Dict]:
+    channel_name = channel.get('name', channel.get('id', 'UNKNOWN'))
+    
+    try:
+        # Add retry logic for rate limits
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                history = client.conversations_history(
+                    channel=channel["id"],
+                    limit=20,  # Fetch more messages to ensure we get at least one actual message
+                    include_all_metadata=False  # We only need the timestamp
+                )
+                
+                # Filter for actual messages (not system messages)
+                messages = [msg for msg in history.get("messages", []) 
+                           if not msg.get("subtype")]
+                if messages:
+                    # messages are already sorted by timestamp (newest first)
+                    channel["latest"] = messages[0]
+                return
+                
+            except SlackApiError as e:
+                if e.response.get("error") == "rate_limited":
+                    retry_count += 1
+                    retry_after = int(e.response.get("headers", {}).get("Retry-After", 5))
+                    print(f"    ⚠️  Rate limited when fetching history for #{channel_name}, waiting {retry_after}s (retry {retry_count}/{max_retries})")
+                    await asyncio.sleep(retry_after)
+                else:
+                    # For non-rate limit errors, raise to outer exception handler
+                    raise
+                    
+        # If we've exhausted retries
+        if retry_count >= max_retries:
+            print(f"    ⚠️  Failed to fetch history for #{channel_name} after {max_retries} retries")
+            
+    except SlackApiError as e:
+        print(f"    ⚠️  Could not fetch history for #{channel_name}: {e.response.get('error', 'unknown error')}")
+    except Exception as e:
+        print(f"    ⚠️  Error fetching history for #{channel_name}: {str(e)}")
+
+def load_cache() -> Dict:
+    """Load channel activity data from cache file if it exists and is not expired."""
+    if not os.path.exists(CACHE_FILE):
+        return {}
+    
+    try:
+        with open(CACHE_FILE, 'r') as f:
+            cache = json.load(f)
+        
+        # Check if cache is expired
+        if time.time() - cache.get('timestamp', 0) > CACHE_EXPIRATION:
+            print("Cache is expired, will fetch fresh data")
+            return {}
+        
+        return cache
+    except Exception as e:
+        print(f"Warning: Could not load cache: {str(e)}")
+        return {}
+
+def save_cache(channels: List[Dict]) -> None:
+    """Save channel activity data to cache file."""
+    try:
+        # Extract only the channel ID and last activity data
+        activity_data = {}
+        for channel in channels:
+            try:
+                if channel.get("latest") and channel.get("id"):
+                    activity_data[channel["id"]] = {
+                        "ts": channel["latest"].get("ts"),
+                        "text": channel["latest"].get("text", "")[:50]  # Store truncated message text for reference
+                    }
+            except Exception:
+                # Skip this channel if there's any issue
+                continue
+        
+        cache = {
+            'timestamp': time.time(),
+            'activity': activity_data
+        }
+        
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(cache, f)
+        
+        print(f"Cached activity data for {len(activity_data)} channels to {CACHE_FILE}")
+    except Exception as e:
+        print(f"Warning: Could not save cache: {str(e)}")
+
+def apply_cached_activity(channels: List[Dict], cache: Dict) -> None:
+    """Apply cached activity data to channel list."""
+    if not cache or 'activity' not in cache:
+        return
+    
+    activity_data = cache['activity']
+    applied_count = 0
+    
+    for channel in channels:
+        # Make sure channel has an id before trying to access it
+        if channel.get("id") and channel["id"] in activity_data:
+            try:
+                # Create a minimal "latest" structure with just the timestamp
+                channel["latest"] = {"ts": activity_data[channel["id"]]["ts"]}
+                applied_count += 1
+            except (KeyError, TypeError):
+                # Skip if there's any issue with the cached data
+                continue
+    
+    if applied_count > 0:
+        print(f"Applied cached activity data to {applied_count} channels")
+
+async def get_all_channels(csv_writer=None, use_cache: bool = True, force_refresh: bool = False, dry_run: bool = False) -> List[Dict]:
     """
     Fetch all active channels (public and private) from Slack workspace.
     Returns a list of channel dictionaries.
     
     Args:
         csv_writer: Optional CSV writer to write channels as they're fetched
+        use_cache: Whether to use cached data if available
+        force_refresh: Whether to force a refresh of the data
+        dry_run: Whether this is a dry run (won't save cache)
     """
     client = get_slack_client()
     channels = []
     cursor = None
     page = 1
+    rate_limit_count = 0
+    
+    # Load cache if not forcing refresh
+    cache = {}
+    if use_cache and not force_refresh:
+        try:
+            cache = load_cache()
+        except Exception as e:
+            print(f"Warning: Could not load cache: {str(e)}")
+            cache = {}
     
     print("\nFetching channels (200 per page)...")
     while True:
@@ -57,40 +174,36 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
                 raise SlackApiError("Failed to fetch channels", response)
             
             new_channels = response["channels"]
-            print(f"\nFetching last activity for {len(new_channels)} channels...")
             
-            # Create tasks for concurrent history fetching
-            tasks = []
-            for i, channel in enumerate(new_channels, 1):
-                print(f"  Queuing #{channel['name']}...")
-                tasks.append(fetch_channel_history(client, channel))
-                if len(tasks) >= 10:  # Process in batches of 10
-                    await asyncio.gather(*tasks)
-                    tasks = []
-                    await asyncio.sleep(0.2)  # Small delay between batches
-            
-            # Process any remaining tasks
-            if tasks:
-                await asyncio.gather(*tasks)
-            
-            channels.extend(new_channels)
-            
-            if csv_writer:
-                for channel in new_channels:
-                    write_channel_to_csv(csv_writer, channel)
-            
-            print(f"Found {len(new_channels)} channels on page {page} (Total: {len(channels)})")
+            # Safety check: validate channel data before adding
+            for channel in new_channels:
+                if not channel.get("id"):
+                    print(f"⚠️  Warning: Skipping channel with missing ID")
+                    continue
+                if not channel.get("name"):
+                    print(f"⚠️  Warning: Skipping channel with ID {channel.get('id')} - missing name")
+                    continue
+                channels.append(channel)
             
             cursor = response.get("response_metadata", {}).get("next_cursor")
             if not cursor:
                 break
             
             page += 1
-            await asyncio.sleep(0.2)  # Small delay between pages
+            await asyncio.sleep(0.5)  # Increased delay between pages to avoid rate limits
             
         except SlackApiError as e:
             error_code = e.response.get("error", "unknown_error")
-            if error_code in ["missing_scope", "invalid_auth"]:
+            if error_code == "rate_limited":
+                rate_limit_count += 1
+                if rate_limit_count > 3:
+                    print("Too many rate limit errors, aborting")
+                    raise
+                retry_after = int(e.response.get("headers", {}).get("Retry-After", 10))
+                print(f"Rate limited. Waiting {retry_after} seconds...")
+                await asyncio.sleep(retry_after)
+                continue
+            elif error_code in ["missing_scope", "invalid_auth"]:
                 raise ValueError(
                     "Missing required scopes or invalid authentication. "
                     "Ensure your token has channels:read and groups:read scopes."
@@ -98,6 +211,68 @@ async def get_all_channels(csv_writer=None) -> List[Dict]:
             raise
     
     print(f"\nFetched {len(channels)} total channels")
+    
+    # Apply cached activity data if available
+    if use_cache and not force_refresh and cache:
+        apply_cached_activity(channels, cache)
+        
+        # Only fetch activity for channels without cached data
+        channels_to_update = [ch for ch in channels if not ch.get("latest")]
+        if channels_to_update:
+            print(f"\nFetching last activity for {len(channels_to_update)} channels without cached data...")
+            
+            # Create tasks for concurrent history fetching
+            tasks = []
+            for i, channel in enumerate(channels_to_update, 1):
+                try:
+                    channel_name = channel.get('name', channel.get('id', 'UNKNOWN'))
+                    print(f"  Queuing #{channel_name}...")
+                    tasks.append(fetch_channel_history(client, channel))
+                    if len(tasks) >= 10:  # Process in batches of 10
+                        await asyncio.gather(*tasks)
+                        tasks = []
+                        await asyncio.sleep(0.2)  # Small delay between batches
+                except Exception as e:
+                    print(f"  ⚠️  Error queuing channel: {str(e)}")
+                    continue
+            
+            # Process any remaining tasks
+            if tasks:
+                await asyncio.gather(*tasks)
+        else:
+            print("\nUsing cached activity data for all channels")
+    else:
+        # Fetch activity for all channels
+        print(f"\nFetching last activity for {len(channels)} channels...")
+        
+        # Create tasks for concurrent history fetching
+        tasks = []
+        for i, channel in enumerate(channels, 1):
+            try:
+                channel_name = channel.get('name', channel.get('id', 'UNKNOWN'))
+                print(f"  Queuing #{channel_name}...")
+                tasks.append(fetch_channel_history(client, channel))
+                if len(tasks) >= 10:  # Process in batches of 10
+                    await asyncio.gather(*tasks)
+                    tasks = []
+                    await asyncio.sleep(0.2)  # Small delay between batches
+            except Exception as e:
+                print(f"  ⚠️  Error queuing channel: {str(e)}")
+                continue
+        
+        # Process any remaining tasks
+        if tasks:
+            await asyncio.gather(*tasks)
+    
+    # Write to CSV if writer provided
+    if csv_writer:
+        for channel in channels:
+            write_channel_to_csv(csv_writer, channel)
+    
+    # Save activity data to cache (skip if dry run)
+    if not dry_run:
+        save_cache(channels)
+    
     return channels
 
 async def get_channel_info(client, channel_id: str) -> Dict:
@@ -408,8 +583,9 @@ async def execute_channel_actions(channels: List[Dict], dry_run: bool = False, b
         
         channels = sorted(channels, key=action_priority)
         
-        # Get current channels once for validation
-        current_channels = await get_all_channels()
+        # Get current channels once for validation (use cache for performance)
+        print("\nLoading channel data for validation...")
+        current_channels = await get_all_channels(use_cache=True, dry_run=dry_run)
         
         # Process channels in batches if batch_size > 0
         batch_channels = []

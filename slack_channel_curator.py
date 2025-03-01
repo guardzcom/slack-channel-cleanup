@@ -42,6 +42,12 @@ async def main():
         default=10,
         help="Number of channels to confirm at once (0 for individual confirmation, default: 10)"
     )
+    parser.add_argument(
+        "--refresh",
+        "-r",
+        action="store_true",
+        help="Force refresh of channel data (ignore cache)"
+    )
     
     args = parser.parse_args()
     
@@ -156,7 +162,7 @@ async def main():
         
         # If no actions were processed, do a full refresh of channels
         print("\nFetching current channels...")
-        current_channels = await get_all_channels()
+        current_channels = await get_all_channels(force_refresh=args.refresh, dry_run=args.dry_run)
         
         # Convert to our format
         if not channels:

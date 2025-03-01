@@ -114,6 +114,9 @@ python slack_channel_curator.py -f channels.csv --batch 5
 
 # Process each channel individually (no batch confirmation)
 python slack_channel_curator.py -f channels.csv --batch 0
+
+# Force refresh of channel data (ignore cache)
+python slack_channel_curator.py -f channels.csv --refresh
 ```
 
 The spreadsheet has the following columns:
@@ -155,9 +158,20 @@ Options:
   --sheet URL          Google Sheets URL (cannot be used with --file)
   -d, --dry-run        Simulate execution without making changes
   -b, --batch SIZE     Number of channels to confirm at once (default: 10, 0 for individual confirmation)
+  -r, --refresh        Force refresh of channel data (ignore cache)
 
 Note: You must specify either --file OR --sheet, but not both.
 ```
+
+## Performance Optimization
+
+The script caches channel activity data to speed up repeated runs. The cache:
+- Is stored in `channel_activity_cache.json` in the project directory (ignored by git)
+- Only stores the last activity timestamps, not the entire channel list
+- Expires after 24 hours
+- Can be refreshed with the `--refresh` flag
+
+This significantly improves performance when making small changes or corrections, as it avoids repeatedly fetching channel activity data from Slack, which is one of the most time-consuming operations.
 
 ## Safety Features
 
