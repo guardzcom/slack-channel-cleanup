@@ -16,10 +16,15 @@ async def fetch_channel_history(client, channel: Dict) -> None:
     try:
         history = client.conversations_history(
             channel=channel["id"],
-            limit=1  # Just get the most recent message
+            limit=20,  # Fetch more messages to ensure we get at least one actual message
+            include_all_metadata=False  # We only need the timestamp
         )
-        if history["messages"]:
-            channel["latest"] = history["messages"][0]
+        # Filter for actual messages (not system messages)
+        messages = [msg for msg in history.get("messages", []) 
+                   if not msg.get("subtype")]
+        if messages:
+            # messages are already sorted by timestamp (newest first)
+            channel["latest"] = messages[0]
     except SlackApiError:
         print(f"    ⚠️  Could not fetch history for #{channel['name']}")
 
