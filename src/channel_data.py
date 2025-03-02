@@ -3,6 +3,7 @@ from typing import List, Dict
 from datetime import datetime
 from .channel_actions import ChannelAction
 import os
+import html
 
 # Standard data structure for channel information
 REQUIRED_HEADERS = [
@@ -56,7 +57,7 @@ def create_csv_writer(filename: str = None):
     except IOError as e:
         raise IOError(f"Failed to create CSV file {filename}: {str(e)}")
 
-def create_channel_dict(channel: Dict, is_new: bool = True) -> Dict:
+def create_channel_dict(channel: Dict, is_new: bool = False) -> Dict:
     """
     Create a standardized channel dictionary from Slack API channel data.
     Converts raw Slack API data into our standard data structure.
@@ -75,11 +76,15 @@ def create_channel_dict(channel: Dict, is_new: bool = True) -> Dict:
         except (ValueError, TypeError, AttributeError):
             pass  # Invalid timestamp or no latest message, leave empty
             
+    # Get the channel description (purpose) and decode HTML entities
+    description = channel.get("purpose", {}).get("value", "")
+    description = html.unescape(description)
+    
     # Start with required fields
     result = {
         "channel_id": channel["id"],
         "name": channel["name"],
-        "description": channel.get("purpose", {}).get("value", ""),
+        "description": description,
         "action": ChannelAction.NEW.value if is_new else ChannelAction.KEEP.value,
         "target_value": ""
     }

@@ -144,8 +144,202 @@ class SheetManager:
         
         return channels
     
+    def _update_cell(self, row: int, col: int, value: str) -> None:
+        """Update a specific cell in the sheet.
+        
+        Args:
+            row: 1-indexed row number
+            col: 1-indexed column number
+            value: New value for the cell
+        """
+        # Convert to A1 notation
+        col_letter = chr(ord('A') + col - 1)
+        cell_range = f"'{self.tab_name}'!{col_letter}{row}"
+        
+        self.sheet.values().update(
+            spreadsheetId=self.sheet_id,
+            range=cell_range,
+            valueInputOption='RAW',
+            body={'values': [[value]]}
+        ).execute()
+    
+    def _update_specific_cells(self, updates: List[Tuple[int, int, str]]) -> None:
+        """Update multiple specific cells in the sheet.
+        
+        Args:
+            updates: List of (row, col, value) tuples where row and col are 1-indexed
+        """
+        # Group updates by row for efficiency
+        row_updates = {}
+        for row, col, value in updates:
+            if row not in row_updates:
+                row_updates[row] = []
+            row_updates[row].append((col, value))
+        
+        # Process updates row by row
+        for row, col_values in row_updates.items():
+            # Sort by column
+            col_values.sort(key=lambda x: x[0])
+            
+            # Find continuous ranges to update
+            ranges = []
+            current_range = []
+            last_col = None
+            
+            for col, value in col_values:
+                if last_col is None or col == last_col + 1:
+                    current_range.append(value)
+                else:
+                    if current_range:
+                        ranges.append((last_col - len(current_range) + 1, current_range))
+                        current_range = [value]
+                last_col = col
+            
+            if current_range:
+                ranges.append((last_col - len(current_range) + 1, current_range))
+            
+            # Update each range
+            for start_col, values in ranges:
+                # Convert to A1 notation
+                start_col_letter = chr(ord('A') + start_col - 1)
+                end_col_letter = chr(ord('A') + start_col + len(values) - 2)
+                
+                if len(values) == 1:
+                    cell_range = f"'{self.tab_name}'!{start_col_letter}{row}"
+                else:
+                    cell_range = f"'{self.tab_name}'!{start_col_letter}{row}:{end_col_letter}{row}"
+                
+                self.sheet.values().update(
+                    spreadsheetId=self.sheet_id,
+                    range=cell_range,
+                    valueInputOption='RAW',
+                    body={'values': [values]}
+                ).execute()
+
     def write_channels(self, channels: List[Dict], clear_actions: bool = False) -> None:
-        """Write channels to the sheet.
+        """Write channels to the sheet with minimal changes for better version history.
+        
+        Args:
+            channels: List of channels to write
+            clear_actions: Whether to clear any actions (set to keep)
+        """
+        headers = list(CHANNEL_HEADERS)
+        
+        # Get existing data to compare
+        existing_values = self._get_all_values()
+        existing_headers = existing_values[0] if existing_values else []
+        
+        # If headers don't match or sheet is empty, we need to rewrite everything
+        if not existing_values or existing_headers != headers:
+            values = [headers]
+            for channel in channels:
+                if clear_actions and channel.get("action") not in [ChannelAction.KEEP.value, ChannelAction.NEW.value]:
+                    channel["action"] = ChannelAction.KEEP.value
+                    channel["target_value"] = ""
+                values.append([channel.get(h, '') for h in headers])
+            
+            # Clear and rewrite
+            self._clear_all_values()
+            self._update_values(values)
+            return
+        
+        # Create a map of existing channels by ID for quick lookup
+        existing_channels = {}
+        header_to_col = {header: idx for idx, header in enumerate(existing_headers)}
+        
+        # Find the column index for channel_id
+        channel_id_col = header_to_col.get("channel_id")
+        if channel_id_col is None:
+            # If we can't find channel_id column, rewrite everything
+            self.write_channels_full_rewrite(channels, clear_actions)
+            return
+        
+        # Map existing channels by ID
+        for row_idx, row in enumerate(existing_values[1:], start=2):  # Start from row 2 (1-indexed)
+            if len(row) > channel_id_col:
+                channel_id = row[channel_id_col]
+                if channel_id:
+                    existing_channels[channel_id] = (row_idx, row)
+        
+        # Prepare updates
+        updates = []
+        new_rows = []
+        
+        # Process each channel
+        for channel in channels:
+            channel_id = channel.get("channel_id", "")
+            
+            # Apply clear_actions if needed
+            if clear_actions and channel.get("action") not in [ChannelAction.KEEP.value, ChannelAction.NEW.value]:
+                channel["action"] = ChannelAction.KEEP.value
+                channel["target_value"] = ""
+            
+            if channel_id in existing_channels:
+                # Update existing channel
+                row_idx, existing_row = existing_channels[channel_id]
+                
+                # Extend existing row if needed
+                existing_row = existing_row + [''] * (len(headers) - len(existing_row))
+                
+                # Check which cells need updates
+                for col_idx, header in enumerate(headers, start=1):  # 1-indexed columns
+                    new_value = channel.get(header, '')
+                    existing_value = existing_row[col_idx-1] if col_idx <= len(existing_row) else ''
+                    
+                    if new_value != existing_value:
+                        updates.append((row_idx, col_idx, new_value))
+                
+                # Mark as processed
+                del existing_channels[channel_id]
+            else:
+                # New channel to add
+                new_rows.append([channel.get(h, '') for h in headers])
+        
+        # Apply all cell updates
+        if updates:
+            self._update_specific_cells(updates)
+        
+        # Add new rows if any
+        if new_rows:
+            # Find the next empty row
+            next_row = len(existing_values) + 1
+            
+            # Append new rows
+            self.sheet.values().append(
+                spreadsheetId=self.sheet_id,
+                range=f"'{self.tab_name}'!A{next_row}",
+                valueInputOption='RAW',
+                insertDataOption='INSERT_ROWS',
+                body={'values': new_rows}
+            ).execute()
+        
+        # Delete rows for channels that no longer exist
+        if existing_channels:
+            # We need to delete rows from bottom to top to avoid shifting issues
+            rows_to_delete = sorted([row_idx for row_idx, _ in existing_channels.values()], reverse=True)
+            
+            # Delete each row
+            for row_idx in rows_to_delete:
+                # Create a delete request
+                request = {
+                    'deleteDimension': {
+                        'range': {
+                            'sheetId': int(self.tab_id),
+                            'dimension': 'ROWS',
+                            'startIndex': row_idx - 1,  # 0-indexed
+                            'endIndex': row_idx  # exclusive end
+                        }
+                    }
+                }
+                
+                # Execute the request
+                self.sheet.batchUpdate(
+                    spreadsheetId=self.sheet_id,
+                    body={'requests': [request]}
+                ).execute()
+    
+    def write_channels_full_rewrite(self, channels: List[Dict], clear_actions: bool = False) -> None:
+        """Legacy method to completely rewrite the sheet.
         
         Args:
             channels: List of channels to write

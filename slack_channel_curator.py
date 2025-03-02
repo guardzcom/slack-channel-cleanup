@@ -186,7 +186,9 @@ async def main():
             existing_channel = next((ch for ch in channels if ch["channel_id"] == channel_id), None)
             if existing_channel:
                 # Update description to keep in sync with Slack
-                existing_channel["description"] = slack_channel.get("purpose", {}).get("value", "")
+                # Use create_channel_dict to ensure HTML entities are decoded
+                temp_dict = create_channel_dict(slack_channel, is_new=False)
+                existing_channel["description"] = temp_dict["description"]
                 # Update name to keep in sync with Slack (unless a rename action is pending)
                 if existing_channel["action"] != ChannelAction.RENAME.value:
                     existing_channel["name"] = slack_channel["name"]
